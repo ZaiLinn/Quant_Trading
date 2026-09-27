@@ -62,7 +62,7 @@ class BacktestEngine:
     def __init__(self, rules: MarketRules, initial_cash: float = 1_000_000,
                  stop_loss: float | None = None, take_profit: float | None = None,
                  trailing_stop: float | None = None, drift_threshold: float | None = None,
-                 min_order_value: float = 0.0):
+                 min_order_value: float = 0.0, max_volume_pct: float | None = None):
         self.rules = rules
         self.initial_cash = float(initial_cash)
         self.stop_loss = stop_loss
@@ -70,6 +70,7 @@ class BacktestEngine:
         self.trailing_stop = trailing_stop
         self.drift_threshold = drift_threshold
         self.min_order_value = min_order_value
+        self.max_volume_pct = max_volume_pct  # 单根成交量参与率上限（以上一根成交量估算，避免用到当根未来数据）
 
     # ------------------------------------------------------------------ 主循环
     def run(self, panel: Panel, targets: pd.DataFrame,
@@ -132,9 +133,10 @@ class BacktestEngine:
                         can_sell = ~(np.isfinite(dn) & (O[t] <= dn * (1 + 1e-4)))
                     sellable = self.pos - self.locked if rules.t_plus_1 else None
                     price = np.where(tradable, O[t], np.nan)
+                    max_qty = self.max_volume_pct * V[t - 1] if self.max_volume_pct else None
                     delta, blocked = plan_orders(last_tgt, self.pos, price, equity_open, self.cash,
                                                  rules, mask, can_buy, can_sell, sellable,
-                                                 self.min_order_value)
+                                                 self.min_order_value, max_qty)
                     pending = mask & blocked
                     # 先卖后买，释放资金
                     for i in np.argsort(delta):

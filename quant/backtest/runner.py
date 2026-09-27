@@ -8,7 +8,8 @@ from ..market import MarketRules
 from ..pipeline import build_targets
 from .engine import BacktestEngine, BacktestResult
 
-ENGINE_KEYS = ("stop_loss", "take_profit", "trailing_stop", "drift_threshold", "min_order_value")
+ENGINE_KEYS = ("stop_loss", "take_profit", "trailing_stop", "drift_threshold", "min_order_value",
+               "max_volume_pct")
 
 
 def run_backtest(strategy, panel: Panel, rules: MarketRules, initial_cash: float = 1_000_000,

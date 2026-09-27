@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 
 
 class CachedSource(DataSource):
+    PAD = pd.Timedelta(days=730)
+
     def __init__(self, source: DataSource, cache_dir: str = "./data_cache", ttl_hours: float = 12):
         self.source = source
         self.name = source.name
@@ -41,9 +43,11 @@ class CachedSource(DataSource):
             covers_end = end_ts is not None and len(df) and df.index[-1] >= end_ts
             if covers_start and (fresh or covers_end):
                 return df.loc[start_ts:end_ts]
-        df = self.source.fetch(symbol, start, end, freq)
+        # 多取一段历史：之后换策略（预热更长）或调整开始日期时不必重新下载
+        fetch_start = start_ts - self.PAD if start_ts is not None else None
+        df = self.source.fetch(symbol, fetch_start, end, freq)
         self.dir.mkdir(parents=True, exist_ok=True)
-        df.attrs["req_start"] = str(start_ts) if start_ts is not None else ""
+        df.attrs["req_start"] = str(fetch_start) if fetch_start is not None else ""
         df.to_parquet(path)
         log.info("缓存 %s: %d 行", path.name, len(df))
-        return df
+        return df.loc[start_ts:end_ts]

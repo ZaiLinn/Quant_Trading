@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 
 import numpy as np
 
@@ -23,6 +23,7 @@ class MarketRules:
     transfer_fee: float = 0.0        # 过户费（双边）
     slippage: float = 0.0            # 滑点，按价格比例
     periods_per_year: int = 252      # 日线年化周期数
+    symbol_limits: dict = field(default_factory=dict)  # 个别标的涨跌停幅度覆盖，如 {"159915": 0.2}
 
     def fee(self, value: float, is_sell: bool) -> float:
         """单笔成交费用。value 为成交金额（正数）。"""
@@ -36,10 +37,13 @@ class MarketRules:
 
     def limit_for(self, symbol: str) -> float | None:
         """按代码前缀识别 A 股不同板块涨跌停幅度。"""
+        code = symbol.split(".")[0][-6:]
+        if symbol in self.symbol_limits or code in self.symbol_limits:
+            return self.symbol_limits.get(symbol, self.symbol_limits.get(code))
         if self.price_limit is None or not self.name.startswith("ashare"):
             return self.price_limit
-        code = symbol.split(".")[0][-6:]
-        if code.startswith(("300", "301", "688", "689")):  # 创业板 / 科创板
+        # 创业板 / 科创板股票，以及科创板 ETF（588 开头）；创业板 ETF（如 159915）需在 symbol_limits 中指定
+        if code.startswith(("300", "301", "688", "689", "588")):
             return 0.20
         if code.startswith(("8", "4", "92")):  # 北交所
             return 0.30

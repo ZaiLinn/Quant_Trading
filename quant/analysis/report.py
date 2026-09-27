@@ -91,6 +91,8 @@ def build_payload(result, metrics: dict, title: str) -> dict:
         "equity": series_values(eq_d),
         "bench": series_values(bench) if bench is not None else None,
         "drawdown": series_values(drawdown(eq)[keep]),
+        "excess": series_values((eq / result.benchmark.reindex(eq.index).ffill() - 1)[keep])
+        if result.benchmark is not None else None,
         "exposure": series_values(result.weights.abs().sum(axis=1)[keep]),
         "metrics": [[k, v] for k, v in format_metrics(metrics)],
         "tiles": {k: clean(metrics.get(k)) for k in
@@ -116,6 +118,10 @@ _BT_BODY = r"""
     <h2>权益曲线</h2>
     <div class="legend" id="eq-legend"></div>
     <div class="chart" id="eq-chart"></div>
+  </section>
+  <section class="card" id="ex-card">
+    <h2>相对基准超额收益（策略净值 / 基准净值 − 1）</h2>
+    <div class="chart" id="ex-chart"></div>
   </section>
   <section class="card">
     <h2>策略回撤</h2>
@@ -162,6 +168,10 @@ const eqSeries = [{name: "策略", values: D.equity, color: "--s1"}];
 if (D.bench) eqSeries.push({name: "基准", values: D.bench, color: "--s2"});
 renderLegend(document.getElementById("eq-legend"), eqSeries);
 lineChart(document.getElementById("eq-chart"), D.dates, eqSeries, {height: 320});
+if (D.excess) {
+  lineChart(document.getElementById("ex-chart"), D.dates, [{name: "超额", values: D.excess, color: "--s1"}],
+    {height: 180, fmt: v => (v * 100).toFixed(1) + "%", area: true, zeroBase: true});
+} else document.getElementById("ex-card").remove();
 lineChart(document.getElementById("dd-chart"), D.dates, [{name: "回撤", values: D.drawdown, color: "--s1"}],
   {height: 180, fmt: v => (v * 100).toFixed(1) + "%", area: true, zeroBase: true});
 lineChart(document.getElementById("exp-chart"), D.dates, [{name: "敞口", values: D.exposure, color: "--s1"}],

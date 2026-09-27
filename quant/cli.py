@@ -100,6 +100,10 @@ def cmd_optimize(args, cfg) -> None:
         ppy = bars_per_year(bt.equity.index, s.rules)
         dsr = deflated_sharpe(bt.returns, len(valid), list(valid["sharpe"].dropna() / np.sqrt(ppy)))
         print(f"\n最优参数 {best}：Deflated Sharpe = {dsr:.1%}（试参 {len(valid)} 组；>95% 才较可信）")
+        center = res.loc[res["smooth"].idxmax()]
+        center_p = {k: next(v for v in o["grid"][k] if v == center[k]) for k in o["grid"]}
+        print(f"平台区中心 {center_p}：平台得分 {center['smooth']:.4f}，"
+              f"自身得分 {center['score']:.4f}（参数多维时更推荐用它）")
     out = app.run_dir(cfg, "optimize")
     res.to_csv(out / "grid.csv", index=False)
     if len(o["grid"]) == 2:
@@ -178,7 +182,7 @@ def cmd_walkforward(args, cfg) -> None:
     res = walk_forward(cfg["strategy"]["name"], s.panel, s.rules, o["grid"], w["train"], w["test"],
                        cfg["strategy"].get("params"), cfg.get("risk"), cfg["initial_cash"],
                        o.get("objective", "sharpe"), w.get("anchored", False), o.get("min_trades", 0),
-                       args.jobs or o.get("jobs", 1))
+                       args.jobs or o.get("jobs", 1), w.get("select", "best"))
     print(tabulate(res.windows, headers="keys", tablefmt="simple", floatfmt=".3f", showindex=False))
     if s.benchmark is not None:
         res.oos.benchmark = (s.benchmark.reindex(res.oos.equity.index.union(s.benchmark.index)).ffill()
@@ -195,9 +199,15 @@ def cmd_walkforward(args, cfg) -> None:
 
 
 def cmd_check(args, cfg) -> None:
+    from .data.quality import quality_report
     from .strategy import check_lookahead
 
     s = app.prepare(cfg)
+    q = quality_report(s.panel, s.rules)
+    print("数据质量：")
+    print(tabulate(q.to_dict("records"), headers="keys", tablefmt="simple", floatfmt=".3f"))
+    if q["issues"].fillna("").astype(bool).any():
+        print("提示：异常跳变多为复权口径问题或数据错误，建议核对后再回测。\n")
     problems = check_lookahead(s.strategy, s.panel, n_checks=args.n)
     if problems:
         print(f"发现未来函数（{len(problems)} 处）：")
@@ -232,7 +242,17 @@ def cmd_factor(args, cfg) -> None:
 
 
 def cmd_live(args, cfg) -> None:
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+
     from .live import LiveRunner
+
+    # 实盘日志同时写文件（10MB × 5 份滚动），便于事后排查
+    log_dir = Path(cfg["live"].get("state_dir", "./live_state"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    fh = RotatingFileHandler(log_dir / f"{cfg['name']}.log", maxBytes=10_000_000, backupCount=5, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(fh)
 
     runner = LiveRunner(cfg)
     if args.once:

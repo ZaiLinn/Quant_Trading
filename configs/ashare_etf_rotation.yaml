@@ -1,6 +1,8 @@
 # A 股 ETF 动量轮动：大盘/中小盘/创业板/黄金/纳指/国债，每周选过去 N 日最强的 K 只
 name: etf_rotation
 market: ashare_etf
+market_overrides:
+  symbol_limits: {"159915": 0.2}   # 创业板 ETF 涨跌停为 20%
 initial_cash: 200000
 benchmark: "510300"
 data:

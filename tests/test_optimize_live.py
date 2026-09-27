@@ -34,6 +34,19 @@ def test_walk_forward_windows(panel):
     assert not wf.oos.equity.index.duplicated().any()
 
 
+def test_plateau_scores_prefer_flat_region():
+    from quant.optimize import plateau_scores
+
+    grid = {"a": [1, 2, 3, 4, 5]}
+    df = pd.DataFrame({"a": [1, 2, 3, 4, 5], "score": [0.1, 0.2, 2.0, 0.2, 0.1]})
+    sm = plateau_scores(df, grid)
+    vals = np.array([0.2, 2.0, 0.2])
+    assert sm[2] == pytest.approx(vals.mean() - vals.std())
+    df2 = pd.DataFrame({"a": [1, 2, 3, 4, 5], "score": [0.9, 1.0, 0.95, 0.1, 3.0]})
+    sm2 = plateau_scores(df2, grid)
+    assert sm2.idxmax() == 1  # 平台 (0.9,1.0,0.95) 胜过孤立尖峰 3.0
+
+
 def test_expand_grid():
     assert expand_grid({"a": [1, 2], "b": ["x"]}) == [{"a": 1, "b": "x"}, {"a": 2, "b": "x"}]
 

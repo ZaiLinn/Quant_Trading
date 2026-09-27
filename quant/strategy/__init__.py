@@ -1,4 +1,4 @@
-from . import library  # noqa: F401  注册内置策略
+from . import blend, library  # noqa: F401  注册内置策略
 from .base import (STRATEGIES, Strategy, get_strategy, hold_until, normalize_weights,
                    on_rebalance, rebalance_mask, register)
 from .validate import check_lookahead

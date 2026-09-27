@@ -71,7 +71,32 @@ def grid_search(strategy: str, panel: Panel, rules: MarketRules, grid: dict[str,
     for k, vals in grid.items():  # 保持整数参数的类型（DataFrame 可能把它转成 float）
         if all(isinstance(v, int) and not isinstance(v, bool) for v in vals):
             df[k] = df[k].astype(int)
+    df["smooth"] = plateau_scores(df, grid)
     return df.sort_values("score", ascending=False, kind="stable").reset_index(drop=True)
+
+
+def plateau_scores(df: pd.DataFrame, grid: dict[str, list]) -> pd.Series:
+    """参数"平台"得分：每组参数与其网格邻居（数值参数前后各一格，非数值参数须相同）得分的
+    均值减标准差。
+
+    孤立的高分尖峰往往是噪声，邻域得分离散度大会被扣分；邻域整体都高的平台区在样本外更稳定。
+    无效组合（-inf）按缺失处理，但邻域中无效组合占比超过一半时平台得分记为 -inf。
+    """
+    if not grid:
+        return df["score"]
+    keys = list(grid)
+    numeric = {k: all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in grid[k]) for k in keys}
+    pos = {k: {v: i for i, v in enumerate(grid[k])} for k in keys}
+    coords = [tuple(pos[k][row[k]] for k in keys) for row in df[keys].to_dict("records")]
+    score = dict(zip(coords, df["score"].to_numpy(float)))
+    offsets = [(-1, 0, 1) if numeric[k] else (0,) for k in keys]
+    out = []
+    for c in coords:
+        vals = [score.get(tuple(ci + oi for ci, oi in zip(c, off))) for off in itertools.product(*offsets)]
+        vals = [v for v in vals if v is not None]
+        finite = [v for v in vals if np.isfinite(v)]
+        out.append(np.mean(finite) - np.std(finite) if finite and len(finite) * 2 >= len(vals) else -np.inf)
+    return pd.Series(out, index=df.index)
 
 
 @dataclass
@@ -98,7 +123,8 @@ def _concat_results(parts: list[BacktestResult]) -> BacktestResult:
 def walk_forward(strategy: str, panel: Panel, rules: MarketRules, grid: dict[str, list],
                  train: int, test: int, base_params: dict | None = None, risk: dict | None = None,
                  initial_cash: float = 1_000_000, objective: str = "sharpe", anchored: bool = False,
-                 min_trades: int = 0, jobs: int = 1) -> WalkForwardResult:
+                 min_trades: int = 0, jobs: int = 1, select: str = "best") -> WalkForwardResult:
+    """select：best = 训练窗得分最高；smooth = 训练窗平台得分最高（更抗过拟合）。"""
     base_params = base_params or {}
     T = len(panel)
     if train + test > T:
@@ -116,7 +142,7 @@ def walk_forward(strategy: str, panel: Panel, rules: MarketRules, grid: dict[str
         tr_start = panel.index[tr_s] if tr_s > 0 else None
         res = grid_search(strategy, tr_panel, rules, grid, base_params, risk, initial_cash,
                           objective, tr_start, min_trades, jobs)
-        best = res.iloc[0]
+        best = res.loc[res["smooth"].idxmax()] if select == "smooth" else res.iloc[0]
         params = {c: next(v for v in grid[c] if v == best[c]) for c in grid}
         te_panel = panel.iloc(slice(max(0, tr_e - warm), te_e))
         strat = get_strategy(strategy, **{**base_params, **params})

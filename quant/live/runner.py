@@ -117,6 +117,8 @@ class LiveRunner:
             log.info("%s 非交易日，跳过", now.date())
             return {"skipped": "非交易日"}
         panel, price_s = self.load_data(now)
+        prev_close = panel.close.ffill().iloc[-1] if len(panel) else pd.Series(dtype=float)
+        price_s, prev_close = self._realtime(panel.symbols, price_s, prev_close, now)
         targets = build_targets(self.strategy, panel, self.rules, self.risk)
         desired_s = targets.ffill().iloc[-1]
         pos_d = self.broker.positions()
@@ -160,14 +162,18 @@ class LiveRunner:
         can_buy = can_sell = None
         limits = np.array([self.rules.limit_for(s) or np.nan for s in syms])
         if np.isfinite(limits).any() and len(panel) > 0:
-            prev = panel.close.ffill().iloc[-1].reindex(syms).to_numpy(float)
+            prev = prev_close.reindex(syms).to_numpy(float)
             can_buy = ~(price >= prev * (1 + limits) * (1 - 1e-4))
             can_sell = ~(price <= prev * (1 - limits) * (1 + 1e-4))
         sell_d = self.broker.sellable()
         sellable = np.array([sell_d.get(s, 0.0) for s in syms]) if self.rules.t_plus_1 else None
 
+        max_qty = None
+        if self.risk.get("max_volume_pct"):
+            vol = panel.volume.iloc[-1].reindex(syms).to_numpy(float)
+            max_qty = self.risk["max_volume_pct"] * vol
         delta, blocked = plan_orders(tgt, pos, price, equity, cash, self.rules, mask, can_buy, can_sell,
-                                     sellable, float(self.risk.get("min_order_value") or 0.0))
+                                     sellable, float(self.risk.get("min_order_value") or 0.0), max_qty)
         guarded = self.guard.filter(delta, pos, price, halted=halt is not None)
         clipped = np.abs(guarded) < np.abs(delta) - 1e-12  # 被风控截断/取消的部分下次继续
         delta = guarded
@@ -215,6 +221,27 @@ class LiveRunner:
         else:
             log.info("%s 无需调仓", lines[0])
         return summary
+
+    def _realtime(self, syms: list[str], price: pd.Series, prev_close: pd.Series,
+                  now: pd.Timestamp) -> tuple[pd.Series, pd.Series]:
+        """A 股用新浪实时行情覆盖参考价与昨收（日线数据源盘中可能还没有当天的 K 线）。"""
+        if not self.rules.name.startswith("ashare") or self.cfg["data"].get("source") != "akshare":
+            return price, prev_close
+        try:
+            from ..data.akshare_source import sina_quotes
+
+            q = sina_quotes(syms, self.cfg["data"].get("asset_type", "auto"))
+        except Exception as e:  # noqa: BLE001 实时行情失败时退回日线价格
+            log.warning("实时行情获取失败(%s)，使用日线收盘价", e)
+            return price, prev_close
+        if q.empty:
+            return price, prev_close
+        today = q[q["time"].dt.normalize() == now.normalize()]
+        price, prev_close = price.copy(), prev_close.copy()
+        price.update(today["price"])
+        prev_close.update(today["prev_close"])
+        log.info("实时行情覆盖 %d/%d 个标的", len(today), len(syms))
+        return price, prev_close
 
     def _latest_price(self, symbol: str, now: pd.Timestamp) -> float:
         try:

@@ -6,14 +6,14 @@
 
 ## 特性
 
-- **数据层**：akshare（东方财富优先，限流时自动切换新浪）、ccxt、本地 CSV、合成数据；Parquet 缓存；多标的自动对齐（停牌为 NaN）；指数成分股股票池（沪深 300 / 中证 500 / 上证 50 等）。
-- **回测引擎**：逐 K 线事件驱动，t 收盘出信号、t+1 开盘成交，从机制上杜绝未来函数；完整 A 股规则（100 股一手、T+1、按板块区分的涨跌停、印花税、过户费、最低 5 元佣金）；停牌 / 涨停买不进的订单自动顺延；盘中止损、止盈、移动止损（跳空按开盘价成交）；做空与杠杆（永续合约）；逐笔成交与完整交易回合记账。
-- **策略库（11 个）**：双均线、MACD、RSI 回归、布林回归、KDJ、海龟通道突破（ATR 定仓）、ETF 动量轮动、风险平价（等风险贡献）、网格交易（带滞回）、多因子 TopK 选股、买入持有。
+- **数据层**：akshare（东方财富优先，限流时自动切换腾讯 / 新浪，成交量统一为"股"）、ccxt、本地 CSV、合成数据；Parquet 缓存；多标的自动对齐（停牌为 NaN）；指数成分股股票池（沪深 300 / 中证 500 / 上证 50 等）；数据质量检查（异常跳变、OHLC 不一致、长期不变价）。
+- **回测引擎**：逐 K 线事件驱动，t 收盘出信号、t+1 开盘成交，从机制上杜绝未来函数；完整 A 股规则（100 股一手、T+1、按板块区分的涨跌停、印花税、过户费、最低 5 元佣金）；停牌 / 涨停买不进的订单自动顺延；成交量参与率上限（大单拆到多根 K 线执行，估算策略容量）；盘中止损、止盈、移动止损（跳空按开盘价成交）；做空与杠杆（永续合约）；逐笔成交与完整交易回合记账。
+- **策略库（12 个）**：双均线、MACD、RSI 回归、布林回归、KDJ、海龟通道突破（ATR 定仓）、ETF 动量轮动、风险平价（等风险贡献）、网格交易（带滞回）、多因子 TopK 选股、买入持有，以及多策略组合 `blend`（按资金比例同账户运行多个策略）。
 - **因子研究**：12 个内置因子；RankIC / ICIR / t 值、分层收益、多空组合、换手与自相关；多因子 z-score 合成。
 - **组合风控**：波动率目标、单标的上限、总杠杆上限、大盘择时（均线过滤）、权重步长（过滤无效换手）、目标漂移再平衡。
-- **防过拟合**：网格搜索（多进程）、参数平面热力图、Walk-Forward 滚动前向验证、Deflated Sharpe Ratio、分块自助法蒙特卡洛、未来函数截断检测。
-- **报告**：自包含 HTML（离线可看、支持深色模式与悬停读数）：权益 / 回撤 / 仓位曲线、月度收益热力表、分标的贡献、交易明细。
-- **模拟盘 / 实盘**：与回测共用目标权重与下单逻辑；只用已收盘 K 线计算信号；幂等（重复运行不重复下单）；熔断文件、单日亏损上限、单笔金额上限；APScheduler 定时；Webhook 通知（飞书 / 钉钉 / Slack）；ccxt 实盘默认 dry-run，API Key 只从环境变量读取。
+- **防过拟合**：网格搜索（多进程）、参数平台得分（邻域均值减标准差）与热力图、Walk-Forward 滚动前向验证（可按平台得分选参）、Deflated Sharpe Ratio、分块自助法蒙特卡洛、未来函数截断检测。
+- **报告**：自包含 HTML（离线可看、支持深色模式与悬停读数）：权益 / 超额收益 / 回撤 / 仓位曲线、月度收益热力表、分标的贡献、交易明细。
+- **模拟盘 / 实盘**：与回测共用目标权重与下单逻辑；只用已收盘 K 线计算信号；A 股用新浪实时行情作为下单参考价；幂等（重复运行不重复下单）；股票池变动后自动清掉池外持仓；熔断文件、单日亏损上限、单笔金额上限；APScheduler 定时；日志滚动写入文件；Webhook 通知（飞书 / 钉钉 / Slack）；ccxt 实盘默认 dry-run，API Key 只从环境变量读取。
 
 ## 快速开始
 
@@ -40,7 +40,7 @@ quant backtest -c configs/crypto_trend.yaml --mc 1000    # 加密货币海龟 + 
 | `quant compare -c 配置 --strategies a,b,c` | 同一数据上对比多个策略 |
 | `quant optimize -c 配置 [--jobs -1]` | 网格搜索参数，输出 Deflated Sharpe 与二维参数热力图 |
 | `quant walkforward -c 配置` | 滚动前向验证，拼接样本外曲线，给出样本外效率 |
-| `quant check -c 配置` | 未来函数截断检测 |
+| `quant check -c 配置` | 数据质量检查 + 未来函数截断检测 |
 | `quant factor -c 配置` | 单因子检验（IC、分层收益），每个因子一份 HTML |
 | `quant live -c 配置 [--once] [--force]` | 模拟盘 / 实盘：`--once` 运行一次，否则按 cron 定时 |
 | `quant status -c 配置 [--report]` | 查看模拟盘持仓、成交、权益记录，`--report` 生成 HTML |
@@ -52,7 +52,9 @@ quant backtest -c configs/crypto_trend.yaml --mc 1000    # 加密货币海龟 + 
 ```yaml
 name: etf_rotation
 market: ashare_etf            # generic | ashare | ashare_etf | crypto | crypto_perp
-market_overrides: {commission: 0.0001}   # 按自己的实际费率覆盖
+market_overrides:             # 按自己的实际费率覆盖
+  commission: 0.0001
+  symbol_limits: {"159915": 0.2}   # 个别标的涨跌停幅度（如创业板 ETF 为 20%）
 initial_cash: 200000
 benchmark: "510300"           # 或 {symbol: "000300", asset_type: index}
 data:
@@ -77,8 +79,9 @@ risk:
   regime_scale: 0.0           # 降仓后的仓位比例（0 = 空仓）
   drift_threshold: null       # 实际权重偏离目标超过该值时再平衡
   min_order_value: 0
+  max_volume_pct: 0.05        # 单根 K 线最多成交上一根成交量的 5%，超出部分顺延
 optimize: {objective: sharpe, min_trades: 10, grid: {lookback: [10, 20, 60], top_k: [1, 2]}}
-walkforward: {train: 756, test: 252}
+walkforward: {train: 756, test: 252, select: smooth}   # smooth = 按参数平台得分选参
 live: {broker: paper, cron: "35 9 * * mon-fri", max_daily_loss: 0.05}
 ```
 
@@ -89,6 +92,7 @@ live: {broker: paper, cron: "35 9 * * mon-fri", max_daily_loss: 0.05}
 | `demo_synthetic.yaml` | 离线演示：合成数据双均线 |
 | `ashare_etf_rotation.yaml` | 6 只 ETF 周度动量轮动 |
 | `ashare_etf_allweather.yaml` | ETF 风险平价（类全天候） |
+| `ashare_etf_blend.yaml` | 多策略组合：50% 动量轮动 + 50% 风险平价 |
 | `ashare_stock_trend.yaml` | 个股双均线 + 移动止损，基准沪深 300 |
 | `ashare_factor_csi300.yaml` | 沪深 300 多因子选股与因子检验 |
 | `crypto_trend.yaml` | 币安现货海龟突破 + 波动率目标（含实盘配置） |
@@ -140,8 +144,8 @@ strategy:
 
 ## 防过拟合流程
 
-1. `quant optimize`：看参数热力图，选"平台区"中心而不是孤立的最高点；关注 Deflated Sharpe（试参次数越多，要求越高）。
-2. `quant walkforward`：每个窗口只用训练段选参、在紧随其后的样本外段检验；样本外效率（OOS/IS）低于 0.5 通常意味着明显过拟合。
+1. `quant optimize`：看参数热力图与输出的"平台区中心"（邻域得分均值减标准差最高的参数），而不是孤立的最高点；关注 Deflated Sharpe（试参次数越多，要求越高）。
+2. `quant walkforward`：每个窗口只用训练段选参、在紧随其后的样本外段检验；样本外效率（OOS/IS）低于 0.5 通常意味着明显过拟合。`walkforward.select: smooth` 按平台得分选参，通常更稳。
 3. `quant backtest --mc 1000`：分块自助法看年化收益与回撤的分布区间，以及亏损概率。
 4. `quant check`：确认没有未来函数。
 5. 先模拟盘运行一段时间，对比实际成交与回测。
@@ -154,7 +158,8 @@ quant live -c configs/ashare_etf_rotation.yaml            # 按 live.cron 定时
 quant status -c configs/ashare_etf_rotation.yaml
 ```
 
-- **时点**：回测是"t 收盘出信号、t+1 开盘成交"，因此 A 股建议开盘后运行（如 9:35），加密货币在日线收盘后运行（如 UTC 00:05）。运行器会剔除未收盘的当前 K 线，只用它的最新价作为下单参考价。
+- **时点**：回测是"t 收盘出信号、t+1 开盘成交"，因此 A 股建议开盘后运行（如 9:35），加密货币在日线收盘后运行（如 UTC 00:05）。运行器会剔除未收盘的当前 K 线，只用它的最新价作为下单参考价；A 股优先使用新浪实时行情的最新价与昨收（涨跌停判断）。
+- **日志**：`live_state/<名称>.log`（10MB × 5 份滚动）。
 - **状态**：保存在 `live_state/`（原子写入）。目标权重未变化时不交易，重复运行安全；停牌 / 涨跌停 / T+1 / 下单失败 / 被风控截断的订单下次继续尝试。
 - **风控**：创建 `live_state/STOP` 文件即熔断（只允许减仓）；当日亏损超过 `max_daily_loss` 暂停开仓；`max_order_value` 限制单笔金额。
 - **加密货币实盘**：`live.broker: ccxt`。API Key 通过环境变量提供：`QUANT_BINANCE_API_KEY`、`QUANT_BINANCE_SECRET`（其他交易所同理，部分需要 `QUANT_<EXCHANGE>_PASSWORD`）。默认 `dry_run: true` 只打印不下单，可先用 `sandbox: true` 在测试网验证；确认后再改为 `dry_run: false`。
@@ -198,11 +203,11 @@ quant/
 | pyfolio / quantstats / empyrical | 绩效指标与报告版式 | 已停更依赖，改为自实现 |
 | López de Prado | Deflated Sharpe、Walk-Forward、分块自助法 | — |
 
-另外修正了开源代码中常见的几个坑：复权数据增量缓存会混入不同复权基准（改为过期整段重拉）；"周期末调仓"隐含下一根日期信息（改为周期首根）；网格线来回穿越时原价反复买卖（加一格滞回）；新浪接口多线程并发会导致 V8 崩溃（加锁串行）。
+另外修正了开源代码中常见的几个坑：复权数据增量缓存会混入不同复权基准（改为过期整段重拉）；"周期末调仓"隐含下一根日期信息（改为周期首根）；网格线来回穿越时原价反复买卖（加一格滞回）；新浪接口多线程并发会导致 V8 崩溃（加锁串行）；东财成交量单位是"手"、新浪 / 腾讯是"股"（统一换算）；不复权 ETF 数据把份额拆分当成暴跌（优先腾讯复权数据，并用数据质量检查兜底）。
 
 ## 注意事项
 
-- 回测不等于未来收益。使用指数"当前"成分股回测历史存在幸存者偏差；免费数据可能有错漏；新浪 ETF 数据为不复权价。
+- 回测不等于未来收益。使用指数"当前"成分股回测历史存在幸存者偏差；免费数据可能有错漏，回测前先跑 `quant check` 看数据质量；东财与腾讯都不可用时 ETF 会退回新浪不复权数据（份额拆分会表现为"暴跌"，`quant check` 能发现）。
 - 默认费率只是常见值，请按自己的券商 / 交易所费率在 `market_overrides` 中覆盖。印花税 2023-08-28 起为 0.05%，更早期间的成本会略被低估。
 - 日线回测无法刻画盘中成交细节；止损按最高 / 最低价判断，同一根 K 线内的先后顺序未知。
 - 实盘有真实资金风险。先模拟盘，再小资金，确认日志与回测一致后再逐步放大。本项目不构成投资建议。

@@ -1,0 +1,24 @@
+# 多策略组合：50% ETF 动量轮动 + 50% 风险平价，同一账户运行
+name: etf_blend
+market: ashare_etf
+market_overrides:
+  symbol_limits: {"159915": 0.2}   # 创业板 ETF 涨跌停为 20%
+initial_cash: 300000
+benchmark: "510300"
+data:
+  source: akshare
+  asset_type: etf
+  adjust: qfq
+  symbols: ["510300", "510500", "159915", "518880", "513100", "511010"]
+  start: "2016-01-01"
+strategy:
+  name: blend
+  params:
+    components:
+      - {name: momentum_rotation, params: {lookback: 20, top_k: 2, rebalance: W}, weight: 0.5}
+      - {name: risk_parity, params: {window: 60, rebalance: M, method: erc}, weight: 0.5}
+risk:
+  weight_step: 0.02
+live:
+  broker: paper
+  cron: "35 9 * * mon-fri"

@@ -75,3 +75,24 @@ def test_psr_dsr_bootstrap():
     assert deflated_sharpe(good, n_trials=100) < probabilistic_sharpe(good)
     sim = bootstrap(good, 252, n=200)
     assert sim.shape == (200, 3) and (sim["max_drawdown"] <= 0).all()
+
+
+def test_quality_report_flags_split():
+    from conftest import make_panel
+    from quant import get_rules
+    from quant.data.quality import quality_report
+
+    p = make_panel({"A": [10, 10.1, 10.2, 2.05, 2.06], "B": [5, 5.1, 5.2, 5.3, 5.4]})
+    q = quality_report(p, get_rules("ashare_etf")).set_index("symbol")
+    assert "异常跳变" in q.loc["A", "issues"]
+    assert q.loc["B", "issues"] == ""
+
+
+def test_symbol_limits_override():
+    from quant import get_rules
+
+    r = get_rules("ashare_etf", symbol_limits={"159915": 0.2})
+    assert r.limit_for("159915") == 0.2 and r.limit_for("510300") == 0.10
+    a = get_rules("ashare")
+    assert a.limit_for("300750") == 0.2 and a.limit_for("688981") == 0.2 and a.limit_for("600519") == 0.1
+    assert get_rules("crypto").limit_for("BTC/USDT") is None

@@ -26,7 +26,7 @@ DEFAULTS: dict = {
     "strategy": {"name": "sma_cross", "params": {}},
     "risk": {},
     "optimize": {"objective": "sharpe", "grid": {}, "min_trades": 5, "jobs": 1},
-    "walkforward": {"train": 504, "test": 126, "anchored": False},
+    "walkforward": {"train": 504, "test": 126, "anchored": False, "select": "best"},  # select: best | smooth
     "factor": {"specs": [], "horizons": [1, 5, 20], "quantiles": 5},
     "live": {
         "broker": "paper",           # paper | ccxt

@@ -21,10 +21,12 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
                 cash: float, rules: MarketRules, mask: np.ndarray,
                 can_buy: np.ndarray | None = None, can_sell: np.ndarray | None = None,
                 sellable: np.ndarray | None = None,
-                min_order_value: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+                min_order_value: float = 0.0,
+                max_qty: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """计算各标的下单数量（正买负卖）。
 
-    返回 (delta, blocked)：blocked 表示因停牌/涨跌停/T+1 无法成交、需要下一根继续尝试的标的。
+    返回 (delta, blocked)：blocked 表示因停牌/涨跌停/T+1/容量限制未能（全部）成交、需要下一根继续的标的。
+    max_qty 为单笔数量上限（如上一根成交量 × 参与率），超出部分分多根执行。
     资金不足时按比例缩减加仓单；平仓单优先释放资金。
     """
     n = len(pos)
@@ -58,6 +60,12 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
         hit = (delta < 0) & (pos > 0) & (delta < cap - EPS)
         blocked |= hit
         delta = np.where(hit, cap, delta)
+
+    if max_qty is not None:
+        cap = rules.round_qty(np.where(np.isfinite(max_qty), np.maximum(max_qty, 0.0), np.inf))
+        hit = np.abs(delta) > cap + EPS
+        blocked |= hit
+        delta = np.where(hit, np.sign(delta) * cap, delta)
 
     if min_order_value > 0:
         small = np.abs(delta) * px < min_order_value

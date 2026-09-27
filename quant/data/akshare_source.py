@@ -1,11 +1,14 @@
 """A 股数据（akshare）。
 
-优先东方财富接口（支持复权、日期区间）；东财限流/断连时自动切换新浪接口：
-股票日线支持复权；ETF 为不复权价（分红较少的宽基 ETF 影响有限）；指数无复权问题。
+优先东方财富接口（支持复权、日期区间）；东财限流/断连时自动切换备用源：
+- 股票日线：新浪（支持复权）；
+- ETF 日线：腾讯（支持复权，能正确处理份额拆分）→ 新浪（不复权，最后兜底）；
+- 指数日线：新浪（指数无复权问题）。
 """
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 import pandas as pd
@@ -16,6 +19,7 @@ log = logging.getLogger(__name__)
 
 # 新浪接口内部用 V8（mini_racer）解码，多线程并发调用会让进程直接崩溃，必须串行
 _SINA_LOCK = threading.Lock()
+os.environ.setdefault("TQDM_DISABLE", "1")  # akshare 部分接口会打印进度条
 
 _CN_COLS = {"日期": "date", "时间": "date", "开盘": "open", "收盘": "close",
             "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount"}
@@ -54,7 +58,7 @@ class AkshareSource(DataSource):
         self._em_down = False  # 东财接口失败后本实例直接走新浪，避免每个标的都等待重试
 
     def cache_key(self, symbol: str, freq: str) -> str:
-        return f"{self.name}_{self._type(symbol)}_{symbol}_{freq}_{self.adjust or 'raw'}"
+        return f"{self.name}_v3_{self._type(symbol)}_{symbol}_{freq}_{self.adjust or 'raw'}"
 
     def _type(self, symbol: str) -> str:
         return guess_asset_type(symbol) if self.asset_type == "auto" else self.asset_type
@@ -85,7 +89,7 @@ class AkshareSource(DataSource):
             elif kind == "etf":
                 primary = lambda: ak.fund_etf_hist_em(symbol=symbol, period=period, start_date=s,  # noqa: E731
                                                       end_date=e, adjust=self.adjust)
-                backup = lambda: ak.fund_etf_hist_sina(symbol=exchange_prefix(symbol))  # noqa: E731
+                backup = self._etf_backup(symbol, s, e)
             elif kind == "index":
                 primary = lambda: ak.index_zh_a_hist(symbol=symbol, period=period,  # noqa: E731
                                                      start_date=s, end_date=e)
@@ -96,7 +100,11 @@ class AkshareSource(DataSource):
         else:
             raise ValueError(f"akshare 不支持周期 {freq}")
 
+        em = "成交量" in raw.columns
         df = raw.rename(columns=_CN_COLS)
+        if em:
+            # 东财成交量单位是"手"（100 股），新浪是"股"：统一为股，否则换源后量价因子、容量估算全错
+            df["volume"] = pd.to_numeric(df["volume"], errors="coerce") * 100
         df = df.set_index(pd.to_datetime(df["date"]))
         return normalize(df).loc[start_ts:end_ts]
 
@@ -108,11 +116,25 @@ class AkshareSource(DataSource):
                 if backup is None:
                     raise
                 self._em_down = True
-                log.warning("东财接口不可用(%s)，改用新浪接口", type(e).__name__)
-        if kind == "etf" and self.adjust:
-            log.warning("%s 使用新浪不复权数据（分红除息日会出现价格缺口）", symbol)
+                log.warning("东财接口不可用(%s)，改用备用接口（腾讯/新浪）", type(e).__name__)
         with _SINA_LOCK:
-            return retry(backup, what=f"新浪 {kind} {symbol}")
+            return retry(backup, what=f"备用源 {kind} {symbol}")
+
+    def _etf_backup(self, symbol: str, s: str, e: str):
+        import akshare as ak
+
+        def fetch():
+            if self.adjust:
+                try:
+                    return retry(lambda: ak.stock_zh_a_hist_tx(symbol=exchange_prefix(symbol), start_date=s,
+                                                               end_date=e, adjust=self.adjust,
+                                                               timeout=self.timeout),
+                                 tries=3, what=f"腾讯 etf {symbol}")
+                except Exception as err:  # noqa: BLE001
+                    log.warning("腾讯接口失败(%s)，%s 改用新浪不复权数据（拆分/分红日会出现价格缺口）",
+                                type(err).__name__, symbol)
+            return ak.fund_etf_hist_sina(symbol=exchange_prefix(symbol))
+        return fetch
 
 
 def index_prefix(symbol: str) -> str:
@@ -135,6 +157,46 @@ def index_constituents(index: str) -> list[str]:
     except Exception:  # noqa: BLE001
         df = retry(lambda: ak.index_stock_cons_sina(symbol=code), what=f"新浪成分 {code}")
         return sorted(df["code"].astype(str).str.zfill(6).unique())
+
+
+def sina_quotes(symbols: list[str], asset_type: str = "auto") -> pd.DataFrame:
+    """新浪实时行情（A 股股票/ETF/指数），不复权原始价格。
+
+    返回 index=symbol，列 open/prev_close/price/high/low/volume/amount/time（time 为行情时间戳）。
+    停牌或无数据的标的不在结果中。
+    """
+    import requests
+
+    def code(sym: str) -> str:
+        return index_prefix(sym) if asset_type == "index" else exchange_prefix(sym)
+
+    rows = {}
+    for i in range(0, len(symbols), 200):
+        batch = symbols[i:i + 200]
+        url = "https://hq.sinajs.cn/list=" + ",".join(code(s) for s in batch)
+        r = retry(lambda: requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=10),
+                  what="新浪实时行情")
+        r.encoding = "gbk"
+        by_code = {}
+        for line in r.text.splitlines():
+            if "=\"" not in line:
+                continue
+            key = line.split("=")[0].rsplit("_", 1)[-1]
+            by_code[key] = line.split("\"")[1].split(",")
+        for sym in batch:
+            f = by_code.get(code(sym))
+            if not f or len(f) < 32:
+                continue
+            try:
+                price = float(f[3])
+                if price <= 0:
+                    continue
+                rows[sym] = {"open": float(f[1]), "prev_close": float(f[2]), "price": price,
+                             "high": float(f[4]), "low": float(f[5]), "volume": float(f[8]),
+                             "amount": float(f[9]), "time": pd.Timestamp(f"{f[30]} {f[31]}")}
+            except (ValueError, IndexError):
+                continue
+    return pd.DataFrame.from_dict(rows, orient="index")
 
 
 def trade_calendar() -> pd.DatetimeIndex:

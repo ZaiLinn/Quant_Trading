@@ -118,3 +118,12 @@ def test_trade_start_excludes_warmup(panel):
     r = run_backtest(get_strategy("sma_cross", fast=10, slow=50), panel, get_rules("generic"), start=start)
     assert r.equity.index[0] >= start
     assert r.positions.iloc[1:].abs().sum().sum() > 0
+
+
+def test_volume_participation_splits_large_orders():
+    p = make_panel({"A": [10.0] * 6}, volume=1000)
+    rules = get_rules("generic")
+    r = BacktestEngine(rules, 100_000, max_volume_pct=0.1).run(p, const_targets(p, {"A": [1.0] + [NAN] * 5}))
+    # 每根最多成交上一根成交量的 10% = 100 股，目标 10000 股需要分多根执行
+    assert (r.fills["qty"] <= 100 + 1e-9).all()
+    assert len(r.fills) == 5
