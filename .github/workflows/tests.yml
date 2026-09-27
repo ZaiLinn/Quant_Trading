@@ -14,3 +14,12 @@ jobs:
       - run: pip install numpy pandas pyarrow PyYAML tabulate requests pytest ib_async
       - run: pip install -e . --no-deps
       - run: pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t quant:ci .
+      - run: docker run --rm quant:ci strategies
+      - run: docker run --rm quant:ci backtest -c configs/demo_synthetic.yaml --no-save
+      - run: cp .env.example .env && docker compose config -q && docker compose --profile ibkr config -q

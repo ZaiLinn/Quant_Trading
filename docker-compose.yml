@@ -1,0 +1,61 @@
+# VPS 部署：docker compose up -d
+# 详细步骤见 DEPLOY.md。敏感信息（账号、API Key、webhook）放在 .env（从 .env.example 复制）。
+name: quant
+
+x-quant: &quant
+  build: .
+  image: quant:latest
+  restart: unless-stopped
+  env_file: .env
+  volumes:
+    - ./configs:/app/configs:ro      # 修改配置后 docker compose restart 即可生效
+    - ./live_state:/app/live_state  # 模拟盘/实盘状态、日志、熔断文件（务必备份）
+    - ./data_cache:/app/data_cache
+    - ./runs:/app/runs
+  logging:
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+services:
+  # 自动驾驶：美股 ETF 本地模拟盘 + 每月自动重新选参（不需要 IBKR）
+  autopilot:
+    <<: *quant
+    command: ["autopilot", "-c", "configs/us_autopilot.yaml"]
+
+  # 想同时跑多个策略：复制一个服务，换配置文件即可（每个配置的 name 要不同）
+  # etf-rotation:
+  #   <<: *quant
+  #   command: ["live", "-c", "configs/ashare_etf_rotation.yaml"]
+
+  # ---------------- IBKR：docker compose --profile ibkr up -d ----------------
+  # 策略容器通过 ib-gateway:4004（模拟）/ 4003（实盘）连接网关
+  autopilot-ibkr:
+    <<: *quant
+    profiles: [ibkr]
+    depends_on: [ib-gateway]
+    command: ["autopilot", "-c", "configs/us_autopilot.yaml",
+              "--set", "live.broker=ibkr", "--set", "ibkr.host=ib-gateway", "--set", "ibkr.port=4004",
+              "--set", "name=us_autopilot_ibkr"]
+
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    profiles: [ibkr]
+    restart: always
+    environment:
+      TWS_USERID: ${TWS_USERID}
+      TWS_PASSWORD: ${TWS_PASSWORD}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      READ_ONLY_API: "no"
+      TIME_ZONE: America/New_York
+      AUTO_RESTART_TIME: "11:59 PM"   # 每日自动重启，避免每天重新做 2FA
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+    ports:
+      # 只绑定本机回环地址，绝不对公网开放 API 端口；本地调试可用 ssh -L 4002:127.0.0.1:4002 转发
+      - "127.0.0.1:4001:4003"
+      - "127.0.0.1:4002:4004"
+    volumes:
+      - tws_settings:/home/ibgateway/tws_settings
+
+volumes:
+  tws_settings:

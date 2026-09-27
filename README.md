@@ -266,4 +266,4 @@ pytest            # 70+ 个测试：引擎记账与费用、A 股规则、未来
 make test         # 同上；另有 make demo / backtest / optimize / factor / paper / status（CFG=配置文件）
 ```
 
-服务器部署模拟盘 / 实盘可用 `Dockerfile`（见文件头注释）；`.github/workflows/tests.yml` 为 GitHub Actions 测试流程。
+部署到 VPS 7×24 运行见 [DEPLOY.md](DEPLOY.md)（Docker Compose 一键启动，含 IB Gateway 容器与 systemd 方案）；`.github/workflows/tests.yml` 为 GitHub Actions 测试流程。

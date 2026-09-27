@@ -1,0 +1,21 @@
+# 不用 Docker 时的 systemd 服务（Ubuntu/Debian）：
+#   sudo cp deploy/quant-autopilot.service /etc/systemd/system/
+#   按需修改 User / WorkingDirectory / 配置文件路径
+#   sudo systemctl daemon-reload && sudo systemctl enable --now quant-autopilot
+#   journalctl -u quant-autopilot -f      # 查看日志
+[Unit]
+Description=Quant autopilot (paper/live trading + periodic re-optimization)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/home/quant/Quant_Trading
+EnvironmentFile=-/home/quant/Quant_Trading/.env
+ExecStart=/home/quant/Quant_Trading/.venv/bin/quant autopilot -c configs/us_autopilot.yaml
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -4,3 +4,6 @@ runs
 live_state
 **/__pycache__
 .pytest_cache
+.git
+.env
+.github

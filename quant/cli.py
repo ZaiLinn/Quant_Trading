@@ -242,19 +242,22 @@ def cmd_factor(args, cfg) -> None:
     print("解读：|年化ICIR|>0.5 且 |t|>3、分组单调性接近 ±1 的因子更可靠；负 IC 因子组合时取负权重。")
 
 
-def cmd_live(args, cfg) -> None:
+def _file_log(cfg) -> None:
+    """实盘 / 自动驾驶日志同时写文件（10MB × 5 份滚动），便于事后排查。"""
     from logging.handlers import RotatingFileHandler
     from pathlib import Path
 
-    from .live import LiveRunner
-
-    # 实盘日志同时写文件（10MB × 5 份滚动），便于事后排查
     log_dir = Path(cfg["live"].get("state_dir", "./live_state"))
     log_dir.mkdir(parents=True, exist_ok=True)
     fh = RotatingFileHandler(log_dir / f"{cfg['name']}.log", maxBytes=10_000_000, backupCount=5, encoding="utf-8")
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().addHandler(fh)
 
+
+def cmd_live(args, cfg) -> None:
+    from .live import LiveRunner
+
+    _file_log(cfg)
     runner = LiveRunner(cfg)
     if args.once:
         print(runner.run_once(force=args.force))
@@ -294,6 +297,7 @@ def cmd_autopilot(args, cfg) -> None:
         d = ap.reoptimize()
         print(json.dumps({k: d[k] for k in ("switched", "reason", "new")}, ensure_ascii=False, default=str))
         return
+    _file_log(cfg)
     if args.once:
         if ap.due(ap.now()):
             ap.reoptimize()
