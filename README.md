@@ -43,6 +43,7 @@ quant backtest -c configs/crypto_trend.yaml --mc 1000    # 加密货币海龟 + 
 | `quant check -c 配置` | 数据质量检查 + 未来函数截断检测 |
 | `quant factor -c 配置` | 单因子检验（IC、分层收益），每个因子一份 HTML |
 | `quant live -c 配置 [--once] [--force]` | 模拟盘 / 实盘：`--once` 运行一次，否则按 cron 定时 |
+| `quant autopilot -c 配置 [--simulate / --once / --status]` | 自动驾驶：模拟盘 / 实盘 + 定期自动重新优化 |
 | `quant status -c 配置 [--report]` | 查看模拟盘持仓、成交、权益记录，`--report` 生成 HTML |
 
 任意配置项都可以在命令行覆盖：`--set strategy.params.fast=5 --set data.start=2020-01-01`。
@@ -97,6 +98,7 @@ live: {broker: paper, cron: "35 9 * * mon-fri", max_daily_loss: 0.05}
 | `ashare_factor_csi300.yaml` | 沪深 300 多因子选股与因子检验 |
 | `us_etf_rotation.yaml` | 美股 ETF 动量轮动，IBKR 实盘配置（默认 dry-run） |
 | `hk_stock_trend.yaml` | 港股趋势，逐只每手股数，IBKR 实盘配置 |
+| `us_autopilot.yaml` | 自动驾驶：美股 ETF 模拟盘 + 每月自动重新选参 |
 | `crypto_trend.yaml` | 币安现货海龟突破 + 波动率目标（含实盘配置） |
 | `crypto_grid.yaml` | BTC 小时线网格 |
 
@@ -169,6 +171,19 @@ quant status -c configs/ashare_etf_rotation.yaml
 - **A 股实盘**：内置模拟盘。接入券商只需继承 `quant.live.Broker` 实现 `positions / cash / sellable / execute` 四个方法，建议基于 QMT（xtquant）、掘金等官方量化接口；不建议使用模拟点击交易客户端的方案。
 - **通知**：设置 `live.webhook` 或环境变量 `QUANT_WEBHOOK_URL`，`live.webhook_kind` 取 `feishu` / `dingtalk` / `slack` / `generic`。
 
+## 自动驾驶：自动跑模拟盘 + 定期自动优化
+
+```bash
+quant autopilot -c configs/us_autopilot.yaml --simulate   # ① 先历史回放整个流程，与固定参数对比
+quant autopilot -c configs/us_autopilot.yaml --once       # ② 运行一次（需要时先优化，再交易）
+quant autopilot -c configs/us_autopilot.yaml              # ③ 常驻：按 live.cron 交易，按 autopilot.reopt_cron 优化
+quant autopilot -c configs/us_autopilot.yaml --status     # 查看当前方案与历次优化决策
+```
+
+每次优化（默认每月 1 日）：取最近 `train_bars` 根 K 线做训练、之后 `holdout_bars` 根做验证；每个候选策略在训练集上按参数平台得分选参，再与当前方案一起在验证集（训练时没见过的最近数据）上比较；只有验证集得分高出 `min_improvement`、成交笔数足够、且距上次切换超过 `cooldown_days` 才切换。所有决策写入 `live_state/<名称>_autopilot.json` 并推送通知；运行以来回撤超过 `max_live_drawdown` 自动熔断。
+
+**实测结论（美股 ETF，2014–2026 历史回放）**：同一策略内定期重新选参，收益与固定参数接近（夏普 0.60 vs 0.63），最大回撤从 -33% 降到 -18%；在多个不同策略之间自动切换则明显更差（夏普 0.38 vs 0.59）——追逐近期赢家往往买在高点。因此默认配置只做单策略调参；任何自动优化方案上线前都应先用 `--simulate` 验证它确实比固定参数好。
+
 ## Interactive Brokers（IBKR）
 
 1. 安装依赖：`pip install ib_async`（已在 requirements.txt 中）。
@@ -210,6 +225,7 @@ quant/
 ├── backtest/          事件驱动回测引擎
 ├── analysis/          绩效指标、HTML 报告、稳健性检验
 ├── optimize.py        网格搜索、Walk-Forward
+├── autopilot.py       自动驾驶：定时交易 + 定期重新优化 + 回撤熔断
 ├── live/              Broker（模拟盘 / ccxt）、风控、通知、运行器
 ├── ibkr.py            Interactive Brokers 数据源与 Broker
 ├── config.py / app.py 配置加载与装配

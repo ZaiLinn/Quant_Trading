@@ -127,3 +127,10 @@ def test_volume_participation_splits_large_orders():
     # 每根最多成交上一根成交量的 10% = 100 股，目标 10000 股需要分多根执行
     assert (r.fills["qty"] <= 100 + 1e-9).all()
     assert len(r.fills) == 5
+
+
+def test_start_carries_existing_target(panel):
+    # 月度调仓策略从月中开始回测：应立即按最近一次目标建仓，而不是空仓等到下个月
+    r = run_backtest(get_strategy("risk_parity", window=20, rebalance="M"), panel, get_rules("generic"),
+                     start="2020-06-15")
+    assert r.fills["date"].min() <= r.equity.index[2]

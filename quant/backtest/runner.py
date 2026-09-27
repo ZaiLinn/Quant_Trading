@@ -20,8 +20,12 @@ def run_backtest(strategy, panel: Panel, rules: MarketRules, initial_cash: float
     targets = build_targets(strategy, panel, rules, risk)
     engine = BacktestEngine(rules, initial_cash, **{k: risk.get(k) for k in ENGINE_KEYS if risk.get(k) is not None})
     if start is not None:
+        carried = targets.ffill()
         panel = panel.slice(start, None)
-        targets = targets.loc[panel.index]
+        targets = targets.loc[panel.index].copy()
+        # 开始交易的第一根沿用此前最近一次的目标：定期调仓（NaN=保持）的策略不必空仓等到下个调仓日
+        if len(targets):
+            targets.iloc[0] = targets.iloc[0].fillna(carried.loc[panel.index[0]])
     result = engine.run(panel, targets, benchmark)
     result.meta["strategy"] = repr(strategy)
     return result

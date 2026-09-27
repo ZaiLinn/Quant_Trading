@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
@@ -261,6 +262,46 @@ def cmd_live(args, cfg) -> None:
         runner.run_forever()
 
 
+def cmd_autopilot(args, cfg) -> None:
+    from .autopilot import Autopilot
+
+    ap = Autopilot(cfg)
+    if args.simulate:
+        from .analysis import html_report, print_summary
+        from .backtest import run_backtest
+
+        s = app.prepare(cfg, extra_warmup=ap.ap["train_bars"] + ap.ap["holdout_bars"] + ap._warmup())
+        start = s.trade_start or s.panel.index[0]
+        res, decisions = ap.simulate(s.panel, start, every=args.every)
+        fixed = run_backtest(s.strategy, s.panel, s.rules, cfg["initial_cash"], cfg.get("risk"),
+                             start=res.equity.index[0])
+        m, mf = res.metrics(), fixed.metrics()
+        print(tabulate(decisions.to_dict("records"), headers="keys", tablefmt="simple", maxcolwidths=[None, None, 40, None, 50]))
+        rows = [(k, f"{m[k]:.4f}", f"{mf[k]:.4f}") for k in ("cagr", "sharpe", "max_drawdown", "calmar", "turnover")]
+        print("\n同一区间对比：")
+        print(tabulate(rows, headers=["指标", "自动优化", f"固定参数 {s.strategy}"], tablefmt="simple"))
+        out = app.run_dir(cfg, "autopilot_sim")
+        decisions.to_csv(out / "decisions.csv", index=False)
+        print(f"\n报告: {html_report(res, m, out / 'report.html', cfg['name'] + ' · 自动优化历史回放').resolve()}")
+        return
+    if args.status:
+        st = ap.status()
+        print(f"当前方案: {st['active']}  上次优化: {st['last_reopt']}  上次切换: {st['last_switch']}")
+        for d in st["history"][-args.n:]:
+            print(f"  {d['time'][:16]}  {'切换' if d['switched'] else '保持'}：{d['reason']}")
+        return
+    if args.reopt:
+        d = ap.reoptimize()
+        print(json.dumps({k: d[k] for k in ("switched", "reason", "new")}, ensure_ascii=False, default=str))
+        return
+    if args.once:
+        if ap.due(ap.now()):
+            ap.reoptimize()
+        print(ap.trade(force=args.force))
+        return
+    ap.run_forever()
+
+
 def cmd_status(args, cfg) -> None:
     import json
     from pathlib import Path
@@ -344,6 +385,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("live", cmd_live, "模拟盘/实盘")
     sp.add_argument("--once", action="store_true", help="只运行一次")
     sp.add_argument("--force", action="store_true", help="忽略交易日历（调试用）")
+    sp = add("autopilot", cmd_autopilot, "自动驾驶：模拟盘/实盘 + 定期自动重新优化")
+    sp.add_argument("--once", action="store_true", help="需要时先优化，再交易一次")
+    sp.add_argument("--force", action="store_true", help="忽略交易日历（调试用）")
+    sp.add_argument("--reopt", action="store_true", help="立即重新优化一次")
+    sp.add_argument("--status", action="store_true", help="查看当前方案与优化记录")
+    sp.add_argument("-n", type=int, default=10, help="--status 显示的记录条数")
+    sp.add_argument("--simulate", action="store_true", help="历史回放整个自动优化流程，并与固定参数对比")
+    sp.add_argument("--every", type=int, default=63, help="--simulate 时每隔多少根 K 线重新优化一次")
     add("status", cmd_status, "查看模拟盘/实盘状态").add_argument("--report", action="store_true",
                                                              help="生成权益与成交 HTML 报告")
     return p

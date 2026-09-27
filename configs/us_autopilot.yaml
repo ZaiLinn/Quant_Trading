@@ -1,0 +1,38 @@
+# 自动驾驶示例：美股 ETF 模拟盘每天运行，每月自动在候选策略/参数中重新选择
+#   quant autopilot -c configs/us_autopilot.yaml --simulate   # 先历史回放，看自动优化是否真的有用
+#   quant autopilot -c configs/us_autopilot.yaml --once       # 运行一次（需要时先优化）
+#   quant autopilot -c configs/us_autopilot.yaml              # 常驻：按 live.cron 交易、按 reopt_cron 优化
+name: us_autopilot
+market: us
+initial_cash: 100000
+benchmark: SPY
+data:
+  source: akshare
+  asset_type: us
+  adjust: qfq
+  symbols: [SPY, QQQ, IWM, EFA, EEM, TLT, IEF, GLD]
+  start: "2014-01-01"
+strategy:                 # 初始方案（自动优化会在此基础上调整参数）
+  name: momentum_rotation
+  params: {lookback: 120, top_k: 3, rebalance: M, abs_momentum: true, skip: 5}
+optimize:
+  objective: sharpe
+  min_trades: 5
+autopilot:
+  # 推荐用法：同一策略内定期重新选参。历史回放（2014~2026）：夏普 0.60 vs 固定参数 0.63，
+  # 最大回撤 -18% vs -33%。在多个不同策略之间自动切换（动量 / 风险平价 / 海龟）回放结果明显更差
+  # （夏普 0.38 vs 0.59）：追逐近期赢家往往买在高点。想尝试多策略候选时，先用 --simulate 验证。
+  candidates:
+    - name: momentum_rotation
+      params: {rebalance: M, abs_momentum: true, skip: 5}
+      grid: {lookback: [60, 120, 250], top_k: [2, 3]}
+  train_bars: 756         # 约 3 年训练
+  holdout_bars: 126       # 约半年验证
+  min_improvement: 0.2    # 验证集夏普至少高 0.2 才切换
+  cooldown_days: 60
+  reopt_cron: "0 18 1 * *"
+  max_live_drawdown: 0.20
+  jobs: 4
+live:
+  broker: paper           # 跑通后可改为 ibkr（配合 dry_run / capital）
+  cron: "35 9 * * mon-fri"

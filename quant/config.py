@@ -43,6 +43,10 @@ DEFAULTS: dict = {
         "webhook": None,             # 通知 webhook 地址，也可用环境变量 QUANT_WEBHOOK_URL
         "webhook_kind": "generic",   # generic | slack | feishu | dingtalk
     },
+    # 自动驾驶（quant autopilot），详见 quant/autopilot.py
+    "autopilot": {"candidates": None, "train_bars": 756, "holdout_bars": 126, "objective": None,
+                  "min_improvement": 0.2, "min_trades": 3, "cooldown_days": 20,
+                  "reopt_cron": "0 18 1 * *", "max_live_drawdown": 0.25, "jobs": 1},
     # IBKR 连接（data.source: ibkr 或 live.broker: ibkr 时使用），详见 quant/ibkr.py
     "ibkr": {"host": "127.0.0.1", "port": 7497, "client_id": 17, "exchange": "SMART", "currency": "USD",
              "account": "", "order_type": "MKT", "fill_timeout": 60},
