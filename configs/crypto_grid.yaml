@@ -1,0 +1,23 @@
+# BTC 固定区间网格：1 小时线，60000~120000 USDT 区间 20 格
+# 网格本质是"区间内越跌越买"，单边下跌跌破区间下沿会满仓被套；区间应结合长期判断设置
+# 不设 lower/upper 时改用"均线 ± width 倍标准差、每 reset 周期重置"的动态区间
+name: crypto_grid
+market: crypto
+initial_cash: 10000
+benchmark: BTC/USDT
+data:
+  source: ccxt
+  exchange: binance
+  symbols: [BTC/USDT]
+  start: "2025-09-01"
+  freq: 1h
+strategy:
+  name: grid
+  params: {levels: 20, lower: 60000, upper: 120000}
+risk:
+  min_order_value: 10
+optimize:
+  objective: sharpe
+  grid:
+    levels: [10, 20, 40]
+    lower: [50000, 60000, 70000]

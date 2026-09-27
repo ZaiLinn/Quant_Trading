@@ -1,0 +1,30 @@
+# A 股 ETF 动量轮动：大盘/中小盘/创业板/黄金/纳指/国债，每周选过去 N 日最强的 K 只
+name: etf_rotation
+market: ashare_etf
+initial_cash: 200000
+benchmark: "510300"
+data:
+  source: akshare
+  asset_type: etf
+  adjust: qfq
+  symbols: ["510300", "510500", "159915", "518880", "513100", "511010"]
+  start: "2016-01-01"
+  end: null
+strategy:
+  name: momentum_rotation
+  params: {lookback: 20, top_k: 2, rebalance: W, abs_momentum: true}
+risk:
+  weight_step: 0.05
+optimize:
+  objective: sharpe
+  min_trades: 10
+  jobs: 4
+  grid:
+    lookback: [10, 20, 40, 60, 120]
+    top_k: [1, 2, 3]
+walkforward:
+  train: 756
+  test: 252
+live:
+  broker: paper
+  cron: "35 9 * * mon-fri"   # 开盘后执行，对应回测中的"次日开盘成交"

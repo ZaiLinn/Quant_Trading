@@ -1,0 +1,23 @@
+# A 股个股双均线 + 移动止损，基准沪深 300 指数
+name: stock_trend
+market: ashare
+initial_cash: 500000
+benchmark: {symbol: "000300", asset_type: index}
+data:
+  source: akshare
+  asset_type: stock
+  adjust: qfq
+  symbols: ["600519", "000858", "601318", "600036", "000333", "300750"]
+  start: "2018-01-01"
+strategy:
+  name: sma_cross
+  params: {fast: 20, slow: 60}
+risk:
+  trailing_stop: 0.15
+  max_weight: 0.25
+optimize:
+  objective: calmar
+  min_trades: 10
+  grid:
+    fast: [5, 10, 20, 30]
+    slow: [40, 60, 120]

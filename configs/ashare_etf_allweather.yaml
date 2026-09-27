@@ -1,0 +1,24 @@
+# ETF 风险平价（类全天候）：股票 / 国债 / 黄金 / 海外股票，按等风险贡献每月再平衡
+name: etf_allweather
+market: ashare_etf
+initial_cash: 300000
+benchmark: "510300"
+data:
+  source: akshare
+  asset_type: etf
+  adjust: qfq
+  symbols: ["510300", "510500", "511010", "518880", "513100"]
+  start: "2016-01-01"
+strategy:
+  name: risk_parity
+  params: {window: 60, rebalance: M, method: erc}
+risk:
+  weight_step: 0.02
+optimize:
+  objective: sharpe
+  grid:
+    window: [20, 60, 120, 250]
+    method: [erc, inverse_vol]
+live:
+  broker: paper
+  cron: "35 9 * * mon-fri"

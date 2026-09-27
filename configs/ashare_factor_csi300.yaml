@@ -1,0 +1,25 @@
+# 沪深 300 成分股多因子选股（周频调仓，持有 20 只）
+# 注意：使用"当前"成分股回测历史有幸存者偏差，结果偏乐观；首次下载 300 只股票需要几分钟
+name: csi300_factor
+market: ashare
+initial_cash: 1000000
+benchmark: {symbol: "000300", asset_type: index}
+data:
+  source: akshare
+  asset_type: stock
+  adjust: qfq
+  universe: csi300
+  workers: 8
+  start: "2019-01-01"
+strategy:
+  name: factor_topk
+  params:
+    factors: {momentum_120_20: 1.0, volatility_20: -1.0, amihud_20: 0.5}
+    top_k: 20
+    buffer: 10
+    rebalance: W
+factor:
+  specs: [momentum_20, momentum_120_20, reversal_5, volatility_20, downvol_20, bias_20,
+          volratio_20, amihud_20, maxret_20, skew_20, trend_20, sharpe_60]
+  horizons: [1, 5, 20]
+  quantiles: 5

@@ -1,0 +1,34 @@
+# 加密货币海龟突破 + 波动率目标，币安现货日线（UTC）
+name: crypto_trend
+market: crypto
+initial_cash: 10000
+benchmark: BTC/USDT
+data:
+  source: ccxt
+  exchange: binance
+  symbols: [BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT]
+  start: "2021-01-01"
+  freq: 1d
+strategy:
+  name: donchian_breakout
+  params: {entry: 20, exit: 10, atr_n: 20, risk: 0.02, max_weight: 0.5}
+risk:
+  vol_target: 0.4
+  weight_step: 0.05
+  min_order_value: 10
+optimize:
+  objective: sharpe
+  min_trades: 10
+  grid:
+    entry: [20, 40, 55]
+    exit: [10, 20]
+walkforward:
+  train: 540
+  test: 180
+live:
+  broker: ccxt          # 改为 paper 即为模拟盘
+  dry_run: true         # 确认无误后改为 false 才会真实下单
+  quote: USDT
+  cron: "5 0 * * *"     # UTC 00:05，日线收盘后
+  max_daily_loss: 0.08
+  max_order_value: 3000

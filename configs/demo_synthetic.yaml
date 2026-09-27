@@ -1,0 +1,24 @@
+# 离线演示：合成数据，无需网络
+name: demo
+market: ashare
+initial_cash: 1000000
+benchmark: AAA
+data:
+  source: synthetic
+  symbols: [AAA, BBB, CCC, DDD]
+  start: "2017-01-01"
+  end: "2024-12-31"
+strategy:
+  name: sma_cross
+  params: {fast: 20, slow: 60}
+risk:
+  stop_loss: 0.12
+optimize:
+  objective: sharpe
+  min_trades: 5
+  grid:
+    fast: [5, 10, 20, 30]
+    slow: [40, 60, 90, 120]
+walkforward:
+  train: 504
+  test: 126
