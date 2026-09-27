@@ -1,0 +1,25 @@
+# 港股趋势（回测用免费新浪数据；实盘通过 IBKR，港股每手股数各不相同，需在 symbol_lots 中写明）
+name: hk_trend
+market: hk
+market_overrides:
+  symbol_lots: {"02800": 500, "00700": 100, "09988": 100, "00005": 400, "03690": 100, "01299": 200}
+initial_cash: 1000000
+benchmark: "02800"         # 盈富基金（跟踪恒生指数）
+data:
+  source: akshare
+  asset_type: hk
+  adjust: qfq
+  symbols: ["00700", "09988", "00005", "03690", "01299"]
+  start: "2020-01-01"
+strategy:
+  name: sma_cross
+  params: {fast: 20, slow: 60}
+risk:
+  trailing_stop: 0.15
+ibkr:
+  currency: HKD            # 港股代码会自动转为 IB 格式（00700 -> 700 @ SEHK）
+live:
+  broker: ibkr
+  dry_run: true
+  timezone: Asia/Hong_Kong
+  cron: "35 9 * * mon-fri"

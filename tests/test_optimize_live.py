@@ -117,6 +117,16 @@ def test_live_runner_liquidates_orphans(tmp_path):
     assert "BBB" not in PaperBroker(get_rules("crypto"), tmp_path / f"{cfg['name']}_paper.json").positions()
 
 
+def test_live_runner_capital_limit(tmp_path):
+    cfg = load_config(None, [f"live.state_dir={tmp_path}", "data.symbols=[AAA, BBB]",
+                             "strategy.name=buy_and_hold", "market=crypto", "live.capital=10000",
+                             f"live.kill_switch_file={tmp_path / 'STOP'}"])
+    s = LiveRunner(cfg, source=_NowSource()).run_once()
+    spent = sum(o["qty"] * o["price"] for o in s["orders"])
+    assert 9_900 < spent <= 10_000  # 账户有 100 万现金，但策略只用 1 万
+    assert s["equity"] == pytest.approx(10_000, rel=0.01)
+
+
 class _NowSource(SyntheticSource):
     def fetch(self, symbol, start=None, end=None, freq="1d"):
         end = pd.Timestamp.now().normalize()

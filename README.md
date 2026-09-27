@@ -2,18 +2,18 @@
 
 一个精简、可读、可落地的 Python 量化交易框架：数据获取 → 策略研究 → 因子检验 → 回测 → 参数优化与防过拟合 → 模拟盘 / 实盘，一套代码贯穿始终。
 
-支持 **A 股**（股票 / ETF / 指数，akshare 免费数据）与 **加密货币**（ccxt，100+ 交易所）。核心代码约 4000 行（含报告模板），无重型依赖（不需要 TA-Lib、scipy、数据库）。
+支持 **A 股**（股票 / ETF / 指数，akshare 免费数据）、**美股 / 港股**（免费日线 + Interactive Brokers 数据与实盘）与 **加密货币**（ccxt，100+ 交易所）。核心代码约 4000 行（含报告模板），无重型依赖（不需要 TA-Lib、scipy、数据库）。
 
 ## 特性
 
-- **数据层**：akshare（东方财富优先，限流时自动切换腾讯 / 新浪，成交量统一为"股"）、ccxt、本地 CSV、合成数据；Parquet 缓存；多标的自动对齐（停牌为 NaN）；指数成分股股票池（沪深 300 / 中证 500 / 上证 50 等）；数据质量检查（异常跳变、OHLC 不一致、长期不变价）。
-- **回测引擎**：逐 K 线事件驱动，t 收盘出信号、t+1 开盘成交，从机制上杜绝未来函数；完整 A 股规则（100 股一手、T+1、按板块区分的涨跌停、印花税、过户费、最低 5 元佣金）；停牌 / 涨停买不进的订单自动顺延；成交量参与率上限（大单拆到多根 K 线执行，估算策略容量）；盘中止损、止盈、移动止损（跳空按开盘价成交）；做空与杠杆（永续合约）；逐笔成交与完整交易回合记账。
+- **数据层**：akshare（A 股东方财富优先，限流时自动切换腾讯 / 新浪，成交量统一为"股"；美股 / 港股日线）、IBKR 历史数据（含分钟线）、ccxt、本地 CSV、合成数据；Parquet 缓存；多标的自动对齐（停牌为 NaN）；指数成分股股票池（沪深 300 / 中证 500 / 上证 50 等）；数据质量检查（异常跳变、OHLC 不一致、长期不变价）。
+- **回测引擎**：逐 K 线事件驱动，t 收盘出信号、t+1 开盘成交，从机制上杜绝未来函数；完整 A 股规则（100 股一手、T+1、按板块区分的涨跌停、印花税、过户费、最低 5 元佣金）；美股按股收佣（IBKR 费率）、港股逐只每手股数与双边印花税；停牌 / 涨停买不进的订单自动顺延；成交量参与率上限（大单拆到多根 K 线执行，估算策略容量）；盘中止损、止盈、移动止损（跳空按开盘价成交）；做空与杠杆（永续合约）；逐笔成交与完整交易回合记账。
 - **策略库（12 个）**：双均线、MACD、RSI 回归、布林回归、KDJ、海龟通道突破（ATR 定仓）、ETF 动量轮动、风险平价（等风险贡献）、网格交易（带滞回）、多因子 TopK 选股、买入持有，以及多策略组合 `blend`（按资金比例同账户运行多个策略）。
 - **因子研究**：12 个内置因子；RankIC / ICIR / t 值、分层收益、多空组合、换手与自相关；多因子 z-score 合成。
 - **组合风控**：波动率目标、单标的上限、总杠杆上限、大盘择时（均线过滤）、权重步长（过滤无效换手）、目标漂移再平衡。
 - **防过拟合**：网格搜索（多进程）、参数平台得分（邻域均值减标准差）与热力图、Walk-Forward 滚动前向验证（可按平台得分选参）、Deflated Sharpe Ratio、分块自助法蒙特卡洛、未来函数截断检测。
 - **报告**：自包含 HTML（离线可看、支持深色模式与悬停读数）：权益 / 超额收益 / 回撤 / 仓位曲线、月度收益热力表、分标的贡献、交易明细。
-- **模拟盘 / 实盘**：与回测共用目标权重与下单逻辑；只用已收盘 K 线计算信号；A 股用新浪实时行情作为下单参考价；幂等（重复运行不重复下单）；股票池变动后自动清掉池外持仓；熔断文件、单日亏损上限、单笔金额上限；APScheduler 定时；日志滚动写入文件；Webhook 通知（飞书 / 钉钉 / Slack）；ccxt 实盘默认 dry-run，API Key 只从环境变量读取。
+- **模拟盘 / 实盘**：本地模拟盘、IBKR（美股 / 港股）、ccxt（加密货币）；与回测共用目标权重与下单逻辑；只用已收盘 K 线计算信号；A 股用新浪实时行情作为下单参考价；幂等（重复运行不重复下单）；股票池变动后自动清掉池外持仓；熔断文件、单日亏损上限、单笔金额上限；APScheduler 定时；日志滚动写入文件；Webhook 通知（飞书 / 钉钉 / Slack）；ccxt 实盘默认 dry-run，API Key 只从环境变量读取。
 
 ## 快速开始
 
@@ -95,6 +95,8 @@ live: {broker: paper, cron: "35 9 * * mon-fri", max_daily_loss: 0.05}
 | `ashare_etf_blend.yaml` | 多策略组合：50% 动量轮动 + 50% 风险平价 |
 | `ashare_stock_trend.yaml` | 个股双均线 + 移动止损，基准沪深 300 |
 | `ashare_factor_csi300.yaml` | 沪深 300 多因子选股与因子检验 |
+| `us_etf_rotation.yaml` | 美股 ETF 动量轮动，IBKR 实盘配置（默认 dry-run） |
+| `hk_stock_trend.yaml` | 港股趋势，逐只每手股数，IBKR 实盘配置 |
 | `crypto_trend.yaml` | 币安现货海龟突破 + 波动率目标（含实盘配置） |
 | `crypto_grid.yaml` | BTC 小时线网格 |
 
@@ -163,8 +165,36 @@ quant status -c configs/ashare_etf_rotation.yaml
 - **状态**：保存在 `live_state/`（原子写入）。目标权重未变化时不交易，重复运行安全；停牌 / 涨跌停 / T+1 / 下单失败 / 被风控截断的订单下次继续尝试。
 - **风控**：创建 `live_state/STOP` 文件即熔断（只允许减仓）；当日亏损超过 `max_daily_loss` 暂停开仓；`max_order_value` 限制单笔金额。
 - **加密货币实盘**：`live.broker: ccxt`。API Key 通过环境变量提供：`QUANT_BINANCE_API_KEY`、`QUANT_BINANCE_SECRET`（其他交易所同理，部分需要 `QUANT_<EXCHANGE>_PASSWORD`）。默认 `dry_run: true` 只打印不下单，可先用 `sandbox: true` 在测试网验证；确认后再改为 `dry_run: false`。
+- **IBKR（美股 / 港股）**：见下一节。
 - **A 股实盘**：内置模拟盘。接入券商只需继承 `quant.live.Broker` 实现 `positions / cash / sellable / execute` 四个方法，建议基于 QMT（xtquant）、掘金等官方量化接口；不建议使用模拟点击交易客户端的方案。
 - **通知**：设置 `live.webhook` 或环境变量 `QUANT_WEBHOOK_URL`，`live.webhook_kind` 取 `feishu` / `dingtalk` / `slack` / `generic`。
+
+## Interactive Brokers（IBKR）
+
+1. 安装依赖：`pip install ib_async`（已在 requirements.txt 中）。
+2. 启动 TWS 或 IB Gateway，登录**模拟账户**；在 Configure → API → Settings 中勾选 "Enable ActiveX and Socket Clients"，记下端口（TWS 模拟 7497 / 实盘 7496；Gateway 模拟 4002 / 实盘 4001）。
+3. 配置（以 `configs/us_etf_rotation.yaml` 为例）：
+
+```yaml
+market: us                  # us | hk
+ibkr:
+  port: 7497
+  client_id: 17
+  currency: USD             # 港股用 HKD
+  order_type: ADAPTIVE      # MKT | ADAPTIVE（IB 自适应算法单）
+live:
+  broker: ibkr
+  dry_run: true             # 只读连接、只打印订单；确认无误后再改为 false
+  capital: 20000            # 只用账户中的一部分资金跑本策略
+  cron: "35 9 * * mon-fri"  # 交易所当地时间（美股 America/New_York、港股 Asia/Hong_Kong）
+```
+
+4. 回测用免费日线（`data.source: akshare`，`asset_type: us / hk`）；有 IBKR 行情权限时可改为 `data.source: ibkr`（日线为 IB 复权数据，支持 1m–1h 分钟线，自动分段下载）。
+5. `quant live -c configs/us_etf_rotation.yaml --once` 运行一次，观察日志与 dry-run 订单；稳定后再定时运行、关闭 dry-run。
+
+标的写法：`AAPL`（默认 SMART / USD）、`00700`（currency 为 HKD 时自动转为 SEHK 的 `700`）、`SYMBOL:EXCHANGE:CURRENCY[:PRIMARY]` 可逐个指定。港股每手股数各不相同，写在 `market_overrides.symbol_lots` 中。
+
+安全设计：只管理配置中的标的，账户里手动持有的其他股票不会被卖出；股票池变化时只清掉本策略曾经持有的标的；开市判断基于合约交易时段，自动跳过节假日；未完全成交的订单撤单后下次继续。
 
 ## 架构
 
@@ -181,6 +211,7 @@ quant/
 ├── analysis/          绩效指标、HTML 报告、稳健性检验
 ├── optimize.py        网格搜索、Walk-Forward
 ├── live/              Broker（模拟盘 / ccxt）、风控、通知、运行器
+├── ibkr.py            Interactive Brokers 数据源与 Broker
 ├── config.py / app.py 配置加载与装配
 └── cli.py             命令行
 ```
@@ -203,7 +234,7 @@ quant/
 | pyfolio / quantstats / empyrical | 绩效指标与报告版式 | 已停更依赖，改为自实现 |
 | López de Prado | Deflated Sharpe、Walk-Forward、分块自助法 | — |
 
-另外修正了开源代码中常见的几个坑：复权数据增量缓存会混入不同复权基准（改为过期整段重拉）；"周期末调仓"隐含下一根日期信息（改为周期首根）；网格线来回穿越时原价反复买卖（加一格滞回）；新浪接口多线程并发会导致 V8 崩溃（加锁串行）；东财成交量单位是"手"、新浪 / 腾讯是"股"（统一换算）；不复权 ETF 数据把份额拆分当成暴跌（优先腾讯复权数据，并用数据质量检查兜底）。
+另外修正了开源代码中常见的几个坑：复权数据增量缓存会混入不同复权基准（改为过期整段重拉）；"周期末调仓"隐含下一根日期信息（改为周期首根）；网格线来回穿越时原价反复买卖（加一格滞回）；新浪接口多线程并发会导致 V8 崩溃（加锁串行）；东财成交量单位是"手"、新浪 / 腾讯是"股"（统一换算）；新浪美股"前复权"对分红用累计减法，长历史下早期价格被大幅压低、收益率失真（改为用原始价 + 因子表重建乘法复权）；不复权 ETF 数据把份额拆分当成暴跌（优先腾讯复权数据，并用数据质量检查兜底）。
 
 ## 注意事项
 

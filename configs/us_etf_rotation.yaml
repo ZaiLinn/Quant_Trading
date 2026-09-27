@@ -1,0 +1,39 @@
+# 美股 ETF 动量轮动（回测用免费新浪数据；实盘通过 IBKR）
+# 实盘前：启动 TWS / IB Gateway（模拟账户）→ 启用 API → 先 dry_run 观察几天 → 再改 dry_run: false
+name: us_etf_rotation
+market: us
+initial_cash: 100000
+benchmark: SPY
+data:
+  source: akshare          # 免费日线；有 IBKR 行情权限时可改为 ibkr（已复权，含分红）
+  asset_type: us
+  adjust: qfq
+  symbols: [SPY, QQQ, IWM, EFA, EEM, TLT, IEF, GLD]
+  start: "2012-01-01"
+strategy:
+  name: momentum_rotation
+  params: {lookback: 120, top_k: 3, rebalance: M, abs_momentum: true, skip: 5}
+risk:
+  weight_step: 0.02
+optimize:
+  objective: sharpe
+  min_trades: 10
+  grid:
+    lookback: [60, 120, 250]
+    top_k: [1, 2, 3]
+walkforward:
+  train: 756
+  test: 252
+  select: smooth
+ibkr:
+  port: 7497               # TWS 模拟 7497 / 实盘 7496；IB Gateway 模拟 4002 / 实盘 4001
+  client_id: 17
+  currency: USD
+  order_type: ADAPTIVE     # MKT | ADAPTIVE（IB 自适应算法单）
+live:
+  broker: ibkr             # 改为 paper 即为本地模拟盘
+  dry_run: true
+  capital: 20000           # 只用账户中的 2 万美元运行本策略
+  cron: "35 9 * * mon-fri" # 美东时间开盘后 5 分钟
+  max_daily_loss: 0.05
+  max_order_value: 10000

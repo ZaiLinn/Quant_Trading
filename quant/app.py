@@ -26,6 +26,11 @@ class Setup:
     trade_start: pd.Timestamp | None
 
 
+def data_cfg(cfg: dict) -> dict:
+    """数据源配置：data 段 + 顶层 ibkr 连接参数（source: ibkr 时需要）。"""
+    return {**cfg["data"], "ibkr": cfg.get("ibkr") or {}}
+
+
 def make_rules(cfg: dict) -> MarketRules:
     return get_rules(cfg["market"], **(cfg.get("market_overrides") or {}))
 
@@ -49,7 +54,7 @@ def load_benchmark(cfg: dict, start, end) -> pd.Series | None:
     if not b:
         return None
     b = {"symbol": b} if isinstance(b, str) else dict(b)
-    src_cfg = {**cfg["data"], **{k: v for k, v in b.items() if k != "symbol"}}
+    src_cfg = {**data_cfg(cfg), **{k: v for k, v in b.items() if k != "symbol"}}
     try:
         src = make_source(src_cfg)
         return src.fetch(b["symbol"], start, end, cfg["data"].get("freq", "1d"))["close"]
@@ -62,7 +67,7 @@ def prepare(cfg: dict, extra_warmup: int = 0) -> Setup:
     d = cfg["data"]
     strategy = make_strategy(cfg)
     rules = make_rules(cfg)
-    source = make_source(d)
+    source = make_source(data_cfg(cfg))
     fetch_start = warmup_start(d.get("start"), strategy.warmup() + extra_warmup, d.get("freq", "1d"))
     panel = load_panel(source, resolve_symbols(d), fetch_start, d.get("end"), d.get("freq", "1d"),
                        workers=int(d.get("workers") or (8 if d.get("universe") else 1)))

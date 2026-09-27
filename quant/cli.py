@@ -31,7 +31,7 @@ def cmd_strategies(args, cfg) -> None:
 
 def cmd_download(args, cfg) -> None:
     d = cfg["data"]
-    src = app.make_source(d)
+    src = app.make_source(app.data_cfg(cfg))
     for sym in d["symbols"]:
         df = src.fetch(sym, d.get("start"), d.get("end"), d.get("freq", "1d"))
         print(f"{sym}: {len(df)} 行 {df.index.min()} ~ {df.index.max()}" if len(df) else f"{sym}: 无数据")

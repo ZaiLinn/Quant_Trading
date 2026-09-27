@@ -30,7 +30,7 @@ class RiskGuard:
         return None
 
     def filter(self, delta: np.ndarray, pos: np.ndarray, price: np.ndarray,
-               halted: bool) -> np.ndarray:
+               halted: bool, lots: np.ndarray | None = None) -> np.ndarray:
         out = delta.copy()
         if halted:
             # 只允许减仓：反向单最多平到 0，同向（加仓）单取消
@@ -38,7 +38,7 @@ class RiskGuard:
             out = np.where(reducing, np.sign(out) * np.minimum(np.abs(out), np.abs(pos)), 0.0)
         if self.max_order_value:
             px = np.where(np.isfinite(price) & (price > 0), price, np.inf)
-            cap = self.rules.round_qty(self.max_order_value / px)
+            cap = self.rules.round_qty(self.max_order_value / px, lots)
             too_big = np.abs(out) > cap
             if too_big.any():
                 log.warning("单笔金额超过 %.0f，已截断", self.max_order_value)

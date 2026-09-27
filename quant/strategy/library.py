@@ -164,7 +164,8 @@ class RiskParity(Strategy):
                 out.iloc[t] = 0.0
                 continue
             win = R[t - self.window + 1: t + 1]
-            ok = np.isfinite(win).all(axis=0) & (np.nanstd(win, axis=0) > 0)
+            ok = np.isfinite(win).all(axis=0)
+            ok[ok] = win[:, ok].std(axis=0) > 0
             w = np.zeros(len(panel.symbols))
             if ok.sum() == 1:
                 w[ok] = 1.0

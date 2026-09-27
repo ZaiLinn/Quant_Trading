@@ -20,6 +20,7 @@ dependencies = [
 ashare = ["akshare>=1.14"]
 crypto = ["ccxt>=4.3"]
 live = ["APScheduler>=3.10,<4"]
+ibkr = ["ib_async>=2.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]
@@ -31,3 +32,4 @@ include = ["quant*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:ib_async.*"]

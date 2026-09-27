@@ -29,9 +29,10 @@ DEFAULTS: dict = {
     "walkforward": {"train": 504, "test": 126, "anchored": False, "select": "best"},  # select: best | smooth
     "factor": {"specs": [], "horizons": [1, 5, 20], "quantiles": 5},
     "live": {
-        "broker": "paper",           # paper | ccxt
+        "broker": "paper",           # paper | ccxt | ibkr
+        "capital": None,             # 策略可用资金上限（真实账户只拿一部分钱跑策略时设置）
         "cron": None,                # 例如 "35 9 * * mon-fri"
-        "timezone": None,            # 默认 A 股 Asia/Shanghai，其他 UTC
+        "timezone": None,            # 默认 A 股 Asia/Shanghai、美股 America/New_York、港股 Asia/Hong_Kong，其他 UTC
         "state_dir": "./live_state",
         "dry_run": True,             # ccxt 实盘默认只打印不下单
         "sandbox": False,
@@ -42,6 +43,9 @@ DEFAULTS: dict = {
         "webhook": None,             # 通知 webhook 地址，也可用环境变量 QUANT_WEBHOOK_URL
         "webhook_kind": "generic",   # generic | slack | feishu | dingtalk
     },
+    # IBKR 连接（data.source: ibkr 或 live.broker: ibkr 时使用），详见 quant/ibkr.py
+    "ibkr": {"host": "127.0.0.1", "port": 7497, "client_id": 17, "exchange": "SMART", "currency": "USD",
+             "account": "", "order_type": "MKT", "fill_timeout": 60},
     "output_dir": "./runs",
 }
 

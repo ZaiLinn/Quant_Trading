@@ -22,13 +22,21 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
                 can_buy: np.ndarray | None = None, can_sell: np.ndarray | None = None,
                 sellable: np.ndarray | None = None,
                 min_order_value: float = 0.0,
-                max_qty: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                max_qty: np.ndarray | None = None,
+                lots: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """计算各标的下单数量（正买负卖）。
 
     返回 (delta, blocked)：blocked 表示因停牌/涨跌停/T+1/容量限制未能（全部）成交、需要下一根继续的标的。
     max_qty 为单笔数量上限（如上一根成交量 × 参与率），超出部分分多根执行。
+    lots 为逐标的每手股数（港股每只不同），缺省用 rules.lot_size。
     资金不足时按比例缩减加仓单；平仓单优先释放资金。
     """
+    def rnd(q):
+        return rules.round_qty(q, lots)
+
+    def fees(qty: np.ndarray, value: np.ndarray, is_sell: bool) -> float:
+        return sum(rules.fee(v, is_sell, q) for q, v in zip(qty, value) if v > 0)
+
     n = len(pos)
     delta = np.zeros(n)
     blocked = np.zeros(n, dtype=bool)
@@ -44,7 +52,7 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
         tw = np.maximum(tw, 0.0)
     raw = np.where(ok, tw * equity / px - pos, 0.0)
     # 目标为 0 时全部平掉（A 股卖出允许零股），否则按手数向零取整
-    delta = np.where(ok & (tw == 0), -pos, rules.round_qty(raw))
+    delta = np.where(ok & (tw == 0), -pos, rnd(raw))
 
     if can_buy is not None:
         hit = (delta > 0) & ~can_buy
@@ -62,7 +70,7 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
         delta = np.where(hit, cap, delta)
 
     if max_qty is not None:
-        cap = rules.round_qty(np.where(np.isfinite(max_qty), np.maximum(max_qty, 0.0), np.inf))
+        cap = rnd(np.where(np.isfinite(max_qty), np.maximum(max_qty, 0.0), np.inf))
         hit = np.abs(delta) > cap + EPS
         blocked |= hit
         delta = np.where(hit, np.sign(delta) * cap, delta)
@@ -87,20 +95,20 @@ def plan_orders(target_w: np.ndarray, pos: np.ndarray, price: np.ndarray, equity
         need = np.sum(np.abs(inc) * px)
     else:
         red_value = np.abs(reduce) * px * (1 - slip)
-        cash_after = cash + red_value.sum() - sum(rules.fee(v, True) for v in red_value if v > 0)
+        cash_after = cash + red_value.sum() - fees(reduce, red_value, True)
         buy_value = inc * px * (1 + slip)
         budget = cash_after
-        need = buy_value.sum() + sum(rules.fee(v, False) for v in buy_value if v > 0)
+        need = buy_value.sum() + fees(inc, buy_value, False)
 
     if need > budget + EPS:
         scale = max(budget, 0.0) / need
         for _ in range(5):  # 取整与最低佣金可能导致仍超预算，逐步收缩
-            inc_s = rules.round_qty(inc * scale)
+            inc_s = rnd(inc * scale)
             if is_margin(rules):
                 need_s = np.sum(np.abs(inc_s) * px)
             else:
                 bv = inc_s * px * (1 + slip)
-                need_s = bv.sum() + sum(rules.fee(v, False) for v in bv if v > 0)
+                need_s = bv.sum() + fees(inc_s, bv, False)
             if need_s <= budget + EPS:
                 break
             scale *= 0.98

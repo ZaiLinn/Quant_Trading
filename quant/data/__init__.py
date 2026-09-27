@@ -28,6 +28,10 @@ def make_source(cfg: dict, cache: bool = True) -> DataSource:
 
         src = CcxtSource(exchange=cfg.get("exchange", "binance"), options=cfg.get("exchange_options"),
                          drop_incomplete=cfg.get("drop_incomplete", True))
+    elif kind == "ibkr":
+        from ..ibkr import IbkrSource
+
+        src = IbkrSource(cfg.get("ibkr"), adjust=bool(cfg.get("adjust", True)))
     elif kind == "csv":
         return CsvSource(cfg.get("path", "./data"))
     elif kind == "synthetic":

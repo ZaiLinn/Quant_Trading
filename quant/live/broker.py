@@ -84,7 +84,7 @@ class PaperBroker(Broker):
             return None
         px = exec_price(price, qty, self.rules)
         value = abs(qty) * px
-        fee = self.rules.fee(value, qty < 0)
+        fee = self.rules.fee(value, qty < 0, qty)
         if qty > 0 and not (self.rules.allow_short or self.rules.max_leverage > 1) \
                 and value + fee > self.state["cash"] + 1e-6:
             log.warning("模拟盘资金不足，放弃买入 %s %.4f", symbol, qty)

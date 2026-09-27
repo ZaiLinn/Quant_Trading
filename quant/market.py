@@ -19,21 +19,30 @@ class MarketRules:
     max_leverage: float = 1.0        # 总敞口 / 权益 上限
     commission: float = 0.0          # 佣金率（双边）
     min_commission: float = 0.0      # 单笔最低佣金
+    commission_per_share: float = 0.0  # 按股收佣（美股 IBKR 固定费率 0.005 USD/股），非 0 时替代 commission
+    max_commission_pct: float = 0.0  # 按股收佣时单笔佣金上限（占成交额比例）
     stamp_tax: float = 0.0           # 印花税（仅卖出）
+    buy_tax: float = 0.0             # 买入方税费（港股印花税双边收取）
     transfer_fee: float = 0.0        # 过户费（双边）
     slippage: float = 0.0            # 滑点，按价格比例
     periods_per_year: int = 252      # 日线年化周期数
     symbol_limits: dict = field(default_factory=dict)  # 个别标的涨跌停幅度覆盖，如 {"159915": 0.2}
+    symbol_lots: dict = field(default_factory=dict)    # 个别标的每手股数（港股每只不同），如 {"00005": 400}
 
-    def fee(self, value: float, is_sell: bool) -> float:
-        """单笔成交费用。value 为成交金额（正数）。"""
+    def fee(self, value: float, is_sell: bool, qty: float = 0.0) -> float:
+        """单笔成交费用。value 为成交金额（正数），qty 为数量（按股收佣时需要）。"""
         if value <= 0:
             return 0.0
-        f = max(value * self.commission, self.min_commission)
-        f += value * self.transfer_fee
-        if is_sell:
-            f += value * self.stamp_tax
-        return f
+        if self.commission_per_share:
+            c = max(abs(qty) * self.commission_per_share, self.min_commission)
+            if self.max_commission_pct:
+                c = min(c, value * self.max_commission_pct)
+        else:
+            c = max(value * self.commission, self.min_commission)
+        return c + value * (self.transfer_fee + (self.stamp_tax if is_sell else self.buy_tax))
+
+    def lots_for(self, symbols: list[str]) -> np.ndarray:
+        return np.array([float(self.symbol_lots.get(s, self.lot_size)) for s in symbols])
 
     def limit_for(self, symbol: str) -> float | None:
         """按代码前缀识别 A 股不同板块涨跌停幅度。"""
@@ -49,11 +58,17 @@ class MarketRules:
             return 0.30
         return self.price_limit
 
-    def round_qty(self, qty: np.ndarray | float) -> np.ndarray | float:
-        """按最小交易单位向零取整。"""
-        if self.lot_size and self.lot_size > 0:
-            return np.trunc(np.asarray(qty) / self.lot_size) * self.lot_size
-        return qty
+    def round_qty(self, qty: np.ndarray | float, lot: np.ndarray | float | None = None) -> np.ndarray | float:
+        """按最小交易单位向零取整。lot 可为逐标的数组（见 lots_for），缺省用 lot_size。"""
+        lot = self.lot_size if lot is None else lot
+        lot_a = np.asarray(lot, dtype=float)
+        if not np.any(lot_a > 0):
+            return qty
+        safe = np.where(lot_a > 0, lot_a, 1.0)
+        q = np.asarray(qty, dtype=float)
+        with np.errstate(invalid="ignore"):
+            out = np.where(lot_a > 0, np.trunc(q / safe) * safe, q)
+        return out if (np.ndim(qty) or np.ndim(lot)) else float(out)
 
     def with_overrides(self, **kw) -> "MarketRules":
         valid = {f.name for f in fields(self)}
@@ -76,6 +91,17 @@ PRESETS: dict[str, MarketRules] = {
     "ashare_etf": MarketRules(
         name="ashare_etf", lot_size=100, t_plus_1=True, price_limit=0.10,
         commission=0.0002, min_commission=5.0, slippage=0.0003, periods_per_year=252,
+    ),
+    # 美股（IBKR 固定费率：0.005 USD/股，最低 1 USD，最高成交额 1%；卖出另有 SEC/FINRA 费约 0.003%）
+    "us": MarketRules(
+        name="us", lot_size=1, commission_per_share=0.005, min_commission=1.0, max_commission_pct=0.01,
+        stamp_tax=0.00003, slippage=0.0005, periods_per_year=252,
+    ),
+    # 港股（IBKR 固定费率 0.08%、最低 18 HKD；印花税 0.1% 双边；交易所费用合计约 0.01%）
+    # 每手股数因股票而异，默认 100，其余在 symbol_lots 中指定
+    "hk": MarketRules(
+        name="hk", lot_size=100, commission=0.0008, min_commission=18.0, stamp_tax=0.001, buy_tax=0.001,
+        transfer_fee=0.0001, slippage=0.001, periods_per_year=247,
     ),
     "crypto": MarketRules(
         name="crypto", commission=0.001, slippage=0.0005, periods_per_year=365,

@@ -86,6 +86,7 @@ class BacktestEngine:
         days = idx.normalize()
 
         self._syms, self._idx = syms, idx
+        self._lots = rules.lots_for(syms)
         self.cash = self.initial_cash
         self.pos = np.zeros(N)
         self.avg = np.zeros(N)
@@ -136,7 +137,7 @@ class BacktestEngine:
                     max_qty = self.max_volume_pct * V[t - 1] if self.max_volume_pct else None
                     delta, blocked = plan_orders(last_tgt, self.pos, price, equity_open, self.cash,
                                                  rules, mask, can_buy, can_sell, sellable,
-                                                 self.min_order_value, max_qty)
+                                                 self.min_order_value, max_qty, self._lots)
                     pending = mask & blocked
                     # 先卖后买，释放资金
                     for i in np.argsort(delta):
@@ -191,15 +192,15 @@ class BacktestEngine:
         if qty > 0 and not is_margin(rules):
             # 现金账户不能透支：按可用资金收缩（最低佣金、取整误差兜底）
             value = qty * px
-            while qty > 0 and value + rules.fee(value, False) > self.cash + EPS:
-                step = rules.lot_size or qty * 0.01
-                qty = rules.round_qty(min(qty - step, self.cash / px * 0.999))
+            while qty > 0 and value + rules.fee(value, False, qty) > self.cash + EPS:
+                step = self._lots[i] or qty * 0.01
+                qty = rules.round_qty(min(qty - step, self.cash / px * 0.999), self._lots[i])
                 qty = max(float(qty), 0.0)
                 value = qty * px
             if qty <= 0:
                 return
         value = abs(qty) * px
-        fee = rules.fee(value, is_sell=qty < 0)
+        fee = rules.fee(value, qty < 0, qty)
         self.cash -= qty * px + fee
 
         old = self.pos[i]

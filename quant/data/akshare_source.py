@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 
+import numpy as np
 import pandas as pd
 
 from .base import DataSource, normalize, retry, to_timestamp
@@ -46,7 +47,7 @@ class AkshareSource(DataSource):
 
     def __init__(self, asset_type: str = "auto", adjust: str = "qfq", timeout: float = 15):
         """
-        asset_type: auto | stock | etf | index
+        asset_type: auto | stock | etf | index | us（美股/美股 ETF，如 AAPL）| hk（港股，如 00700）
         adjust: qfq(前复权) | hfq(后复权) | ""(不复权)。
           前复权保证价格连续、手数/金额量级接近真实；涨跌停按相对昨收比例判断，不受乘法复权影响。
         """
@@ -58,7 +59,7 @@ class AkshareSource(DataSource):
         self._em_down = False  # 东财接口失败后本实例直接走新浪，避免每个标的都等待重试
 
     def cache_key(self, symbol: str, freq: str) -> str:
-        return f"{self.name}_v3_{self._type(symbol)}_{symbol}_{freq}_{self.adjust or 'raw'}"
+        return f"{self.name}_v4_{self._type(symbol)}_{symbol}_{freq}_{self.adjust or 'raw'}"
 
     def _type(self, symbol: str) -> str:
         return guess_asset_type(symbol) if self.asset_type == "auto" else self.asset_type
@@ -71,7 +72,16 @@ class AkshareSource(DataSource):
         s, e = start_ts.strftime("%Y%m%d"), end_ts.strftime("%Y%m%d")
         kind = self._type(symbol)
 
-        if freq in _MINUTE:
+        if kind in ("us", "hk"):
+            if freq != "1d":
+                raise ValueError("美股/港股免费数据仅支持日线；分钟线请用 source: ibkr")
+            with _SINA_LOCK:  # 新浪接口，同样不能并发
+                if kind == "us":
+                    raw = us_adjusted(symbol.upper(), self.adjust)
+                else:
+                    raw = retry(lambda: ak.stock_hk_daily(symbol=symbol.zfill(5), adjust=self.adjust),
+                                what=f"新浪 hk {symbol}")
+        elif freq in _MINUTE:
             if kind == "index":
                 raise ValueError("指数分钟线暂不支持")
             fn = ak.stock_zh_a_hist_min_em if kind == "stock" else ak.fund_etf_hist_min_em
@@ -135,6 +145,46 @@ class AkshareSource(DataSource):
                                 type(err).__name__, symbol)
             return ak.fund_etf_hist_sina(symbol=exchange_prefix(symbol))
         return fetch
+
+
+def us_adjusted(symbol: str, adjust: str) -> pd.DataFrame:
+    """美股乘法复权。
+
+    新浪美股的"前复权"对拆分用乘法、对分红用累计减法（qfq = raw × factor + adjust），
+    长历史下早期价格被减去大量分红（SPY 2011 年从 124 变成 48），涨跌幅被放大、年化收益虚高。
+    这里用原始价 + 复权因子表重建：拆分按 factor，分红按 1 − 分红 / 除息前收盘 连乘。
+    """
+    import akshare as ak
+
+    raw = retry(lambda: ak.stock_us_daily(symbol=symbol, adjust=""), what=f"新浪 us {symbol}")
+    raw["date"] = pd.to_datetime(raw["date"])
+    raw = raw.sort_values("date").reset_index(drop=True)
+    if not adjust:
+        return raw
+    tbl = retry(lambda: ak.stock_us_daily(symbol=symbol, adjust="qfq-factor"), what=f"新浪 us 因子 {symbol}")
+    tbl["date"] = pd.to_datetime(tbl["date"])
+    tbl = tbl.sort_values("date").astype({"qfq_factor": float, "adjust": float}).reset_index(drop=True)
+    # 每个交易日所属的因子区间（区间起始日 <= 当日）
+    pos = tbl["date"].searchsorted(raw["date"], side="right") - 1
+    pos = pos.clip(0, len(tbl) - 1)
+    split = tbl["qfq_factor"].to_numpy()[pos]
+    add = tbl["adjust"].to_numpy()[pos]
+    px_cols = ["open", "high", "low", "close"]
+    base = raw[px_cols].astype(float).mul(split, axis=0)  # 仅拆分调整后的价格
+    close = base["close"].to_numpy()
+    mult = np.ones(len(raw))
+    # 分红事件：adjust 在某日跳升（例如 -0.27 -> 0），跳升幅度即除息金额（已按拆分调整）
+    jumps = np.nonzero(np.diff(add) > 1e-9)[0]
+    for j in jumps:
+        ex = j + 1
+        div = add[ex] - add[j]
+        if close[j] > div > 0:
+            mult[:ex] *= 1 - div / close[j]
+    out = raw.copy()
+    out[px_cols] = base.mul(mult, axis=0)
+    if adjust == "hfq":
+        out[px_cols] = out[px_cols] / (mult[0] * split[0]) if mult[0] * split[0] else out[px_cols]
+    return out
 
 
 def index_prefix(symbol: str) -> str:

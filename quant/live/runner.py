@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..app import make_rules, make_strategy, warmup_start
+from ..app import data_cfg, make_rules, make_strategy, warmup_start
 from ..data import DataSource, Panel, freq_to_timedelta, load_panel, make_source, resolve_symbols
 from ..execution import plan_orders
 from ..pipeline import build_targets
@@ -27,6 +27,7 @@ from .notify import Notifier
 log = logging.getLogger(__name__)
 
 ASHARE_CLOSE = (15, 0)
+DEFAULT_TZ = {"ashare": "Asia/Shanghai", "us": "America/New_York", "hk": "Asia/Hong_Kong"}
 
 
 class LiveRunner:
@@ -39,12 +40,12 @@ class LiveRunner:
         self.symbols = resolve_symbols(cfg["data"])
         self.freq = cfg["data"].get("freq", "1d")
         self.risk = cfg.get("risk") or {}
-        self.tz = lv.get("timezone") or ("Asia/Shanghai" if self.rules.name.startswith("ashare") else "UTC")
+        self.tz = lv.get("timezone") or DEFAULT_TZ.get(self.rules.name.split("_")[0], "UTC")
         state_dir = Path(lv.get("state_dir", "./live_state"))
         self.state_path = state_dir / f"{cfg['name']}_runner.json"
         self.state = self._load_state()
         # 实盘需要未收盘的当前 K 线来取最新价；信号计算前由 load_data() 剔除
-        self.source = source or make_source({**cfg["data"], "drop_incomplete": False}, cache=False)
+        self.source = source or make_source({**data_cfg(cfg), "drop_incomplete": False}, cache=False)
         self.broker = broker or self._make_broker(state_dir)
         self.guard = RiskGuard(self.rules, lv.get("max_daily_loss"), lv.get("max_order_value"),
                                lv.get("kill_switch_file"))
@@ -61,7 +62,11 @@ class LiveRunner:
                               quote=lv.get("quote", "USDT"), sandbox=lv.get("sandbox", False),
                               dry_run=lv.get("dry_run", True),
                               options=self.cfg["data"].get("exchange_options"))
-        raise ValueError(f"未知 broker: {lv['broker']}")
+        if lv["broker"] == "ibkr":
+            from ..ibkr import IbkrBroker
+
+            return IbkrBroker(self.rules, self.symbols, self.cfg.get("ibkr"), dry_run=lv.get("dry_run", True))
+        raise ValueError(f"未知 broker: {lv['broker']}（可选 paper / ccxt / ibkr）")
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
@@ -80,6 +85,14 @@ class LiveRunner:
 
     # ------------------------------------------------------------------ 数据
     def is_trading_day(self, now: pd.Timestamp) -> bool:
+        if hasattr(self.broker, "market_open_today"):  # IBKR：按合约交易时段判断，自动识别节假日
+            try:
+                return self.broker.market_open_today(now)
+            except Exception as e:  # noqa: BLE001
+                log.warning("交易时段查询失败(%s)，按工作日处理", e)
+                return now.weekday() < 5
+        if self.rules.name.startswith(("us", "hk")):
+            return now.weekday() < 5
         if not self.rules.name.startswith("ashare"):
             return True
         if now.weekday() >= 5:
@@ -123,7 +136,10 @@ class LiveRunner:
         desired_s = targets.ffill().iloc[-1]
         pos_d = self.broker.positions()
         # 已不在股票池（如指数成分调整、配置删除标的）但仍有持仓的标的：目标设为 0，清仓
-        orphans = [s for s, q in pos_d.items() if q and s not in panel.symbols]
+        # 只清理本策略管理过的标的：IBKR 等真实账户里手动持有的其他股票不会被动
+        managed = set(self.state.get("managed", []))
+        own_all = isinstance(self.broker, PaperBroker)
+        orphans = [s for s, q in pos_d.items() if q and s not in panel.symbols and (own_all or s in managed)]
         if orphans:
             log.warning("持仓 %s 不在当前股票池中，将清仓", orphans)
             for s in orphans:
@@ -134,7 +150,16 @@ class LiveRunner:
         price = price_s.reindex(syms).to_numpy(float)
         pos = np.array([pos_d.get(s, 0.0) for s in syms])
         cash = self.broker.cash()
-        equity = cash + np.nansum(pos * price)
+        pos_value = np.nansum(pos * price)
+        equity = cash + pos_value
+        capital = self.cfg["live"].get("capital")
+        if capital:  # 只用账户中的一部分资金运行本策略
+            equity = min(equity, float(capital))
+            cash_alloc = max(min(cash, equity - pos_value), 0.0)
+        else:
+            cash_alloc = cash
+        cash_before = cash
+        cash = cash_alloc
         today = now.strftime("%Y-%m-%d")
         if self.state["day"] != today:
             self.state["day"] = today
@@ -172,13 +197,15 @@ class LiveRunner:
         if self.risk.get("max_volume_pct"):
             vol = panel.volume.iloc[-1].reindex(syms).to_numpy(float)
             max_qty = self.risk["max_volume_pct"] * vol
+        lots = self.rules.lots_for(syms)
         delta, blocked = plan_orders(tgt, pos, price, equity, cash, self.rules, mask, can_buy, can_sell,
-                                     sellable, float(self.risk.get("min_order_value") or 0.0), max_qty)
-        guarded = self.guard.filter(delta, pos, price, halted=halt is not None)
+                                     sellable, float(self.risk.get("min_order_value") or 0.0), max_qty, lots)
+        guarded = self.guard.filter(delta, pos, price, halted=halt is not None, lots=lots)
         clipped = np.abs(guarded) < np.abs(delta) - 1e-12  # 被风控截断/取消的部分下次继续
         delta = guarded
 
         fills, failed = [], np.zeros(len(syms), dtype=bool)
+        partial = np.zeros(len(syms), dtype=bool)
         for i in np.argsort(delta):  # 先卖后买
             if delta[i] == 0:
                 continue
@@ -187,6 +214,7 @@ class LiveRunner:
                 if f:
                     fills.append(f)
                     self._track_entry(syms[i], pos[i], pos[i] + f["qty"], f["price"])
+                    partial[i] = abs(f["qty"]) < abs(delta[i]) - 1e-9  # 部分成交，剩余下次继续
             except Exception as e:  # noqa: BLE001 单个标的失败不影响其他标的
                 failed[i] = True
                 log.exception("%s 下单失败: %s", syms[i], e)
@@ -198,10 +226,14 @@ class LiveRunner:
         for i in stops:
             self.state["stopped"][syms[i]] = float(desired[i])
         self.state["pending"] = [s for i, s in enumerate(syms)
-                                 if (mask[i] and blocked[i]) or failed[i] or clipped[i]]
+                                 if (mask[i] and blocked[i]) or failed[i] or clipped[i] or partial[i]]
+        self.state["managed"] = sorted(managed | {s for i, s in enumerate(syms) if desired[i]}
+                                       | {f["symbol"] for f in fills})
         pos_after = self.broker.positions()
-        eq_after = self.broker.cash() + sum(q * float(price_s.get(s, np.nan)) for s, q in pos_after.items()
-                                            if np.isfinite(price_s.get(s, np.nan)))
+        pv_after = sum(q * float(price_s.get(s, np.nan)) for s, q in pos_after.items()
+                       if s in syms and np.isfinite(price_s.get(s, np.nan)))
+        # 策略权益 = 策略持仓市值 + 分配给策略的现金（扣除本次成交花掉的部分）
+        eq_after = pv_after + cash_alloc - (cash_before - self.broker.cash())
         self.state["equity_log"] = (self.state["equity_log"] + [[now.isoformat(), eq_after]])[-5000:]
         self._save_state()
 
